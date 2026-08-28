@@ -1,13 +1,16 @@
-// pins.h — 3pi+ 2040 pin cheat sheet.
-// Every mapping verified against Pololu's own C library source
-// (reference/pololu-3pi-2040-robot/c/) and the user's guide (0J86).
+// pins.h — GPIO map for the Pololu 3pi+ 2040 robot.
+//
+// Every mapping below was checked against Pololu's own C library
+// (third_party/pololu_3pi_2040_robot/) and the 3pi+ 2040 user's guide
+// (Pololu document 0J86). Three pads are double-booked and one carries two
+// unrelated jobs; those traps are spelled out under the table.
 //
 //  Function              GPIO      Peripheral / notes
 //  -------------------   -------   -----------------------------------------
-//  Yellow LED            GP25      ACTIVE LOW. Shared with button A!
-//  Button A              GP25      read via output-enable-override trick
+//  Yellow LED            GP25      ACTIVE LOW. Shared with button A.
+//  Button A              GP25      read via the output-enable-override trick
 //  Button B              QSPI_SS   the BOOTSEL pin — not a normal GPIO
-//  Button C              GP0       press = LOW (pull-up). Shared w/ OLED D/C!
+//  Button C              GP0       press = LOW (pull-up). Shared with OLED D/C.
 //  OLED D/C              GP0       SH1106 display, bit-banged/SPI0
 //  OLED RESET            GP1
 //  OLED CLK              GP2       SPI0 SCK
@@ -20,7 +23,7 @@
 //  Right motor DIR       GP10      HIGH = reverse
 //  Left  motor DIR       GP11      HIGH = reverse
 //  Left encoder A/B      GP12/GP13 quadrature (~358 counts/wheel-rev @30:1)
-//  Right motor PWM       GP14      PWM slice 7 ch A, wrap 6000 → 20.8 kHz
+//  Right motor PWM       GP14      PWM slice 7 ch A, 6000-count wrap → 20.8 kHz
 //  Left  motor PWM       GP15      PWM slice 7 ch B
 //  Bump right            GP16      IR RC-decay sensor (like line sensors)
 //  Bump left             GP17
@@ -30,16 +33,35 @@
 //  Line emitter ctl      GP26      HIGH = down IR emitters on … AND:
 //  Battery monitor       GP26/ADC0 reads VBAT/11 through a divider (!)
 //
-// Yes, GP26 has two jobs, and three pins are double-booked (GP25, GP0, GP3).
-// When a conflict finally bites you (~Day 9, display + button C), open the
-// schematic and figure out WHY it works anyway. That's the lesson.
+// Shared-pin traps
+// ----------------
+// GP25 (yellow LED + button A) and GP0 (OLED D/C + button C): a pad that is
+// being driven cannot be read. Both buttons are sampled by forcing the pad's
+// output driver off for a microsecond through the output-enable override,
+// reading the level, then restoring the override — see hw_buttons.c. Sample
+// between display transfers, never in the middle of one. Both buttons read
+// LOW when pressed.
 //
-// Big picture memory map (RP2040 datasheet §2.2):
+// GP3 (OLED MOSI + RGB LED data): the display and the addressable-LED chain
+// hang off the same SPI0 TX pad, so only one of them may drive it at a time.
+//
+// GP26 (line-sensor emitter control + ADC0 battery divider): the pin that
+// switches the down-facing IR emitters is the same pin the VBAT/11 divider
+// feeds. A pad has one function at a time, so neither owner assumes anything
+// about the state it finds the pin in — each re-claims it on every use.
+// hw_line.c drives it high for the length of a sensor read and releases it
+// to a plain input afterwards; hw_battery.c calls adc_gpio_init() on it
+// before every conversion and leaves it in ADC mode. Call order therefore
+// does not matter. What is not allowed is interleaving: a battery read taken
+// in the middle of a line read would switch the emitters off and measure a
+// driven pin instead of the divider.
+//
+// Memory map (RP2040 datasheet §2.2):
 //   0x00000000  boot ROM
-//   0x10000000  XIP flash (your code lives here, executed in place)
+//   0x10000000  XIP flash — code lives here, executed in place
 //   0x20000000  SRAM (264 KB)
 //   0x40000000  APB peripherals (IO_BANK0, PADS, TIMER, PWM, ADC, I2C…)
-//   0xD0000000  SIO — single-cycle GPIO in/out/set/clr/xor (Day 2 home)
+//   0xD0000000  SIO — single-cycle GPIO in/out/set/clr/xor
 
 #ifndef PINS_H
 #define PINS_H

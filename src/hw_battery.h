@@ -1,19 +1,22 @@
 // hw_battery.h — battery voltage via ADC0 (GP26, ÷11 divider).
-// You built this on Day 11 — this is the same idea, hardened.
 #ifndef HW_BATTERY_H
 #define HW_BATTERY_H
 
 #include <stdint.h>
 #include <stdbool.h>
 
-// Battery voltage in millivolts (~4800–5600 on fresh NiMH).
-// NOTE: reconfigures GP26 for ADC — never call mid line-sensor read
-// (hw_line reclaims the pin on every read, so ordinary sequential use
-// from the main loop is fine).
+// Pack voltage in millivolts, roughly 4800–5600 on a freshly charged NiMH
+// set. One blocking conversion, tens of microseconds.
+// Side effect on a shared pin: this switches GP26 to the ADC function and
+// LEAVES it there — GP26 is also the line-sensor emitter control (pins.h).
+// hw_line.c re-claims the pin on every sensor read, so calling the two in
+// sequence from the main loop is fine; what must not happen is a battery
+// read in the middle of a line read.
 uint16_t hw_battery_mv(void);
 
-// Convenience checks against tuning.h thresholds.
-bool hw_battery_low(void);       // < BATT_WARN_MV  → nag
-bool hw_battery_critical(void);  // < BATT_REFUSE_MV → refuse to run
+// Threshold checks against tuning.h. Each takes its own fresh reading, with
+// the same GP26 side effect as hw_battery_mv().
+bool hw_battery_low(void);       // below BATT_WARN_MV: warn, keep running
+bool hw_battery_critical(void);  // below BATT_REFUSE_MV: refuse to start a run
 
 #endif
