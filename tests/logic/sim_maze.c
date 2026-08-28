@@ -1,12 +1,8 @@
-// sim_maze.c — the maze as DATA: a table-driven simulator for the brain.
+// sim_maze.c — the maze as DATA: a table-driven whole-maze simulator.
 //
-// test_maze_logic.c proves each brain function alone. This file proves them
-// TOGETHER: it walks a whole maze — the starter maze that
-// capstone/MAZE_BUILD.md specifies ("Starter maze (Day 19–20)"), as
-// DESIGNED: that build sheet is the provisional oracle until a physical
-// board is taped and sketched (the table's own note below says so, and
-// says what happens to this file when it is) — through the full pipeline
-// the robot runs on the floor:
+// test_maze_logic.c proves each function of logic/maze_logic.c alone. This
+// file proves them TOGETHER, by walking a whole maze through the same
+// pipeline the robot runs on the floor:
 //
 //     classify → decide → record → simplify → replay
 //
@@ -17,33 +13,42 @@
 //     chain: if this level fails, the bug is in decide/record/simplify/
 //     replay, not in sensing.
 //   SENSOR level — the walk synthesizes realistic before/at_center sensor
-//     snapshots for each junction (the model is documented below — argue
-//     with it) and pushes them through a classifier first, exactly as
-//     main.c does. If SYMBOL passes and SENSOR fails, the bug lives in
-//     classification. The sensor level runs TWICE: once through the
-//     capstone's own classifier (classify_junction — called the "student
-//     lane" throughout this tree, a name held over from the course's
-//     build-it-yourself origins and from the USE_MY_CLASSIFIER flag that
-//     selects it; the code is the student's to STUDY, not code he wrote)
-//     and once through the reference classifier (classify_junction_ref)
-//     — the firmware picks one with USE_MY_CLASSIFIER, but the simulator
-//     always proves BOTH, so the fallback lane (invariant I4: the ref
-//     config must stay runnable forever) can never rot unnoticed.
+//     snapshots for each junction (the model is documented below) and
+//     pushes them through a classifier first, exactly as main.c does. If
+//     SYMBOL passes and SENSOR fails, the bug is in classification. The
+//     sensor level runs TWICE, once through classify_junction() and once
+//     through classify_junction_ref(). The firmware selects one of them
+//     with USE_MY_CLASSIFIER; proving both on every run keeps the
+//     unselected one runnable instead of letting it rot unnoticed.
 //
-// Why the maze is a TABLE and not code: so a new maze is DATA, not new
-// logic. T3 collected on that bet — the harder maze below arrived as a
-// second table plus one more run_maze_suite() call, and the walker, the
-// replayer, and every assertion were reused untouched.
+// Reading a failure: every check name carries the maze and the level that
+// produced it — "[harder] sensor replay(derived) reaches the goal" — so
+// the name alone says which maze, which level and which stage broke. A
+// walk that gives up first prints a line naming the node and heading
+// where it stopped, and a misclassification prints what the classifier
+// said next to what the topology says. The last line prints the totals,
+// and the process exits nonzero if anything failed.
 //
-// Why the walk DERIVES the path instead of just asserting the literal
-// "LLBLLBS": a hard-coded expected string can only prove the code agrees
-// with whoever typed the string. Deriving the string from the topology AND
-// checking it against MAZE_BUILD.md's pencil-walk oracle cross-checks three
-// things at once — the topology encoding, the pencil walk, and the code.
-// If any one of them is wrong, they cannot all agree.
+// The maze is a TABLE rather than code so that adding a maze is data, not
+// new logic. The second maze below arrived as one more table and one more
+// run_maze_suite() call, with the walker, the replayer and every
+// assertion reused untouched.
 //
-// Pure host C on purpose (invariants I1/I2): includes maze_logic.h,
-// tuning.h (host-safe — it is nothing but #defines) and libc. No SDK.
+// The walk DERIVES the explore and solved paths from the topology instead
+// of asserting the literal "LLBLLBS", then compares the result against a
+// literal worked out by hand from the maze drawing. A hard-coded expected
+// string can only prove the code agrees with whoever typed it; deriving
+// it cross-checks three things at once — the topology encoding, the hand
+// walk, and the code. If any one of them is wrong, they cannot all agree.
+//
+// Both mazes are transcribed from their drawings as DESIGNED. No physical
+// board has been taped and measured, so the tables and their expected
+// paths are provisional: when a board exists, any drift between it and
+// these tables must be reconciled INTO the tables first. A simulator that
+// walks a different maze than the robot does is worse than no simulator.
+//
+// Pure host C on purpose: maze_logic.h, tuning.h (host-safe — nothing but
+// #defines) and libc. No SDK.
 
 #include <stdio.h>
 #include <string.h>
@@ -83,14 +88,14 @@ static const char *jct_label(junction_t j)
 }
 
 // The junction flavour of CHECK: same bookkeeping, but a failure prints
-// what the classifier actually said (audit AUDIT-23). "wanted
-// STRAIGHT_LEFT, got NONE" names the lost evidence; a bare FAIL line only
-// names the fixture. Both arguments are evaluated exactly once — a macro
-// that evaluates twice works until someone hands it a call with a side
-// effect. This file and test_maze_logic.c each carry their own copy, the
-// same way each carries its own path_from(): the two binaries are
-// deliberately independent (host_tests/Makefile links them differently),
-// and a shared test header would be one more thing to break.
+// what the classifier actually said. "wanted STRAIGHT_LEFT, got NONE"
+// names the lost evidence; a bare FAIL line only names the fixture. Both
+// arguments are evaluated exactly once — a macro that evaluates twice
+// works until someone hands it a call with a side effect. This file and
+// test_maze_logic.c each carry their own copy, the same way each carries
+// its own path_from(): the two binaries are deliberately independent
+// (the Makefile links them against different sources), and a shared test
+// header would be one more thing to break.
 #define CHECK_JCT(name, got, want)                                    \
     do {                                                              \
         junction_t got_ = (got), want_ = (want);                      \
@@ -109,8 +114,8 @@ static const char *jct_label(junction_t j)
 // test_maze_logic.c — each binary stays self-contained), with the UNUSED
 // tail of the buffer filled with POISON instead of zeros.
 //
-// Why the poison (audit AUDIT-22, the same defect one file over): MOVE_NONE
-// is '\0', so the obvious initialiser `{ { 0 }, 0, false }` pre-loads all 64
+// Why the poison (the same defect one file over): MOVE_NONE is '\0', so
+// the obvious initialiser `{ { 0 }, 0, false }` pre-loads all 64
 // bytes with the exact sentinel replay is supposed to have to EARN. Delete
 // the bounds guard in replay_next(), let it index the buffer raw, and a
 // literal-built path hands back MOVE_NONE past its end anyway — the replay
@@ -155,13 +160,12 @@ static void show_path(const char *label, const path_t *p)
 // SENSOR MODEL — how a junction turns into numbers.
 //
 // Calibrated scale: 0 = bright paper, 1000 = deep black tape. The model
-// refuses 0/1000 caricatures on purpose: MAZE_BUILD.md's QC pass promises
-// only "paper well under ~200, tape well over ~700", and the validation
-// ladder's V1 gate is "tape reads >700". A classifier that only works on
-// cartoon numbers would pass here and fail on the floor.
+// refuses 0/1000 caricatures on purpose: the maze build guarantees only
+// "paper well under ~200, tape well over ~700". A classifier that only
+// works on cartoon numbers would pass here and fail on the floor.
 //
-//   SIM_TAPE          — matte tape dead-on under a sensor. Past the V1
-//                       ">700" gate, comfortably above JCT_DARK_THRESH.
+//   SIM_TAPE          — matte tape dead-on under a sensor. Past the
+//                       ">700" line, comfortably above JCT_DARK_THRESH.
 //   SIM_SHOULDER      — a sensor half-covered by the 19 mm line's edge
 //                       (the ~40 mm bar puts ~2.5 sensors' worth on tape,
 //                       so the line's neighbors ride its shoulders). MUST
@@ -181,9 +185,9 @@ static void show_path(const char *label, const path_t *p)
 #define SIM_PAPER_PEAK    150
 #define SIM_SHOULDER_PEAK 520
 
-// If a threshold move (T3's margin work kept 600; a hardware tuning
-// session may still shift it) ever pushes JCT_DARK_THRESH out of the gap
-// this model straddles, fail the BUILD, not the student's afternoon. (The
+// The model is only meaningful while JCT_DARK_THRESH sits in the gap it
+// straddles. A hardware tuning session can move that knob, so if it ever
+// leaves the gap, fail the BUILD rather than silently prove nothing. (The
 // reference classifier's fixed 600 lives in the same gap — see
 // maze_logic_ref.c.)
 #if SIM_TAPE < JCT_DARK_THRESH
@@ -196,9 +200,9 @@ static void show_path(const char *label, const path_t *p)
 // ---------------------------------------------------------------------------
 // TOPOLOGY TABLES — the maze as data.
 //
-// The table stores ABSOLUTE compass arms per node. The robot's left/
-// straight/right are computed from its current heading — the same
-// arithmetic you do turning a maze map to face your direction of travel.
+// The table stores ABSOLUTE compass arms per node. The robot's left,
+// straight and right are computed from its current heading — the same
+// arithmetic as turning a paper map to face the direction of travel.
 // That is also why junction TYPE is not stored in the table: the same
 // piece of tape is a T from below but a STRAIGHT+RIGHT from the west, so
 // type must be a FUNCTION of (topology, approach heading), never a label.
@@ -212,8 +216,8 @@ static int dir_right(int h) { return (h + 1) % DIR_COUNT; }
 static int dir_back(int h)  { return (h + 2) % DIR_COUNT; }
 
 typedef struct {
-    const char *name;           // MAZE_BUILD.md's diagram names — failure
-                                // messages should point at the drawing
+    const char *name;           // the node's name on the maze drawing, so
+                                // failure messages point at the diagram
     int8_t      nbr[DIR_COUNT]; // neighbor node per compass arm, -1 = no tape
     bool        is_goal;        // the ≥50×50 mm solid patch lives here
 } sim_node_t;
@@ -223,16 +227,16 @@ typedef struct {
     const sim_node_t *nodes;
     uint8_t           start;           // node the robot is placed on at GO
     uint8_t           start_heading;   // compass direction it faces at GO
-    const char       *explore_oracle;  // MAZE_BUILD.md's pencil-walk answers:
-    const char       *simplify_oracle; //   the cross-check literals
+    const char       *explore_oracle;  // the hand-worked answers off the
+    const char       *simplify_oracle; // drawing: the cross-check literals
 } sim_maze_t;
 
-// The starter maze, transcribed arm-for-arm from MAZE_BUILD.md ("Starter
-// maze (Day 19–20)"). That spec is the PROVISIONAL oracle: it describes
-// the maze as designed, and the physical maze has not been built and
-// sketched yet. When it is, any as-built drift is reconciled INTO this
-// table first — a simulator that walks a different maze than the robot
-// does is worse than no simulator:
+// The starter maze, transcribed arm-for-arm from its drawing. That
+// drawing is the PROVISIONAL oracle: it describes the maze as designed,
+// and the physical maze has not been built and measured yet. When it is,
+// any as-built drift is reconciled INTO this table first — a simulator
+// that walks a different maze than the robot does is worse than no
+// simulator:
 //
 //         X2─────F─────■ GOAL
 //                 │
@@ -301,8 +305,9 @@ static void synth_snapshots(junction_t truth, bool l, bool s, bool r,
 {
     if (truth == JCT_GOAL) {
         // A straight ≥150 mm approach into a ≥75 mm patch: the bar is on
-        // solid black before the creep AND still on it after (75 − 45 mm
-        // of margin is exactly why MAZE_BUILD.md sizes the patch up).
+        // solid black before the creep AND still on it after. The patch is
+        // sized for exactly that — 75 mm of patch against the 45 mm creep
+        // leaves 30 mm of margin.
         for (int i = 0; i < 5; i++) { before->s[i]    = SIM_TAPE; }
         for (int i = 0; i < 5; i++) { at_center->s[i] = SIM_TAPE; }
         return;
@@ -383,12 +388,11 @@ static junction_t arrive(const sim_maze_t *mz, int node, int h,
 // repeat — the exact loop the explore seam runs on the robot. Returns
 // true iff the goal was reached; the recorded route is in *out.
 //
-// "Exact" is now literal, not aspirational (audit AUDIT-18): the verdict
-// comes from the SAME explore_arrival_verdict() the firmware calls, so a
-// policy change can no longer land on one side only. This walk used to
-// re-implement the screens by hand and had already drifted from the
-// firmware in three cells — the drift is fixed by DELETING the second
-// copy, never by carefully re-synchronizing it.
+// "Exact" is literal, not aspirational: the verdict comes from the SAME
+// explore_arrival_verdict() the firmware calls, so a policy change cannot
+// land on one side only. This walk used to re-implement the screens by
+// hand and had already drifted from the firmware in three cells. The cure
+// for that is DELETING the second copy, not re-synchronizing it by hand.
 static bool explore_maze(const sim_maze_t *mz, classifier_fn clf, path_t *out)
 {
     int node = mz->start;
@@ -419,9 +423,9 @@ static bool explore_maze(const sim_maze_t *mz, classifier_fn clf, path_t *out)
                                                    // is never recorded
         if (v != ARRIVE_PROCEED) {
             // Same codes as main.c, different voice: the robot has 16
-            // OLED columns, a failing host run has a terminal and should
-            // read like a bug report. Keeping the words out of logic/ is
-            // what lets one pure function serve both (invariant I1).
+            // OLED columns, while a failing host run has a terminal and
+            // should read like a bug report. Keeping the wording out of
+            // logic/ is what lets one pure function serve both.
             switch (v) {
             case ARRIVE_FAULT_CLASSIFY_NONE:
                 printf("  sim(%s): JCT_NONE at %s — stopping, not guessing\n",
@@ -485,7 +489,7 @@ static bool explore_maze(const sim_maze_t *mz, classifier_fn clf, path_t *out)
 // standing on an ordinary junction. Judging them is replay_arrival_verdict()
 // — the firmware's own policy, called from the firmware's own copy, so
 // "the simulator agrees with the robot" is a fact about the code rather
-// than a promise about two hand transcriptions (audit AUDIT-18).
+// than a promise about two hand transcriptions.
 static bool replay_maze(const sim_maze_t *mz, classifier_fn clf,
                         const path_t *path)
 {
@@ -512,11 +516,11 @@ static bool replay_maze(const sim_maze_t *mz, classifier_fn clf,
         if (v == ARRIVE_SUCCESS) { return true; }   // path spent ON the goal
         if (v != ARRIVE_PROCEED) {
             // The firmware's five fault cells, in the simulator's voice.
-            // Two of them are new here: this walk used to keep driving
-            // through a JCT_NONE with moves left, and used to merge the
-            // refusal case into "moves ran out, not the goal". The
-            // firmware always split them; now there is only one table to
-            // split (audit AUDIT-18, divergences F1 and F2).
+            // Two of them arrived with the shared verdict function: this
+            // walk used to keep driving through a JCT_NONE with moves
+            // left, and used to merge the refusal case into "moves ran
+            // out, not the goal". The firmware always split them, and now
+            // there is only one table to split.
             switch (v) {
             case ARRIVE_FAULT_NOT_GOAL:
                 printf("  sim(%s): moves ran out at %s (%s), not the goal\n",
@@ -569,13 +573,13 @@ static bool replay_maze(const sim_maze_t *mz, classifier_fn clf,
 }
 
 // ---------------------------------------------------------------------------
-// One maze, the whole story. The harder maze reruns every check below via
-// its table and one more call in main() — nothing in this function knows
-// or cares which maze it is proving.
+// One maze, the whole story. The second maze reruns every check below via
+// its own table and one more call in main() — nothing in this function
+// knows or cares which maze it is proving.
 static void run_maze_suite(const sim_maze_t *mz)
 {
     char nm[96];
-    printf("== %s maze (oracle: %s -> %s, MAZE_BUILD.md) ==\n",
+    printf("== %s maze (oracle: %s -> %s) ==\n",
            mz->name, mz->explore_oracle, mz->simplify_oracle);
 
     // ---------------- SYMBOL level: the decision chain in isolation.
@@ -586,8 +590,8 @@ static void run_maze_suite(const sim_maze_t *mz)
     snprintf(nm, sizeof nm, "[%s] sym explore reaches the goal", mz->name);
     CHECK(nm, reached);
     // The cross-check: the topology-derived string must equal the
-    // pencil-walk literal. If the table were encoded wrong, they couldn't
-    // both be right.
+    // hand-worked literal off the drawing. If the table were encoded
+    // wrong, the two could not both be right.
     snprintf(nm, sizeof nm, "[%s] sym explore derives \"%s\"",
              mz->name, mz->explore_oracle);
     CHECK(nm, reached && path_is(&explored, mz->explore_oracle));
@@ -625,7 +629,7 @@ static void run_maze_suite(const sim_maze_t *mz)
         CHECK(nm, replay_maze(mz, NULL, &lit));
     }
 
-    // ---------------- SENSOR level, student classifier: the tracer —
+    // ---------------- SENSOR level, classify_junction: the full chain —
     // photons → classify_junction → decide → record → simplify → replay.
     {
         path_t exp2 = { { 0 }, 0, false };
@@ -646,23 +650,23 @@ static void run_maze_suite(const sim_maze_t *mz)
         CHECK(nm, replay_maze(mz, classify_junction, &sol2));
     }
 
-    // ---------------- SENSOR level, reference classifier: the I4 floor.
-    // The robot must stay solvable with USE_MY_CLASSIFIER commented out;
-    // proving the ref lane on every run keeps that lane from rotting.
+    // ---------------- SENSOR level, the reference classifier: the floor.
+    // The robot must stay solvable with USE_MY_CLASSIFIER commented out,
+    // so proving that path on every run keeps it from rotting.
     {
         path_t exp3 = { { 0 }, 0, false };
         bool r3 = explore_maze(mz, classify_junction_ref, &exp3);
-        snprintf(nm, sizeof nm, "[%s] ref-lane explore derives \"%s\" (I4)",
+        snprintf(nm, sizeof nm, "[%s] reference-classifier explore derives \"%s\"",
                  mz->name, mz->explore_oracle);
         CHECK(nm, r3 && path_is(&exp3, mz->explore_oracle));
 
         path_t sol3 = exp3;
         path_simplify(&sol3);
-        snprintf(nm, sizeof nm, "[%s] ref-lane simplify(derived) == \"%s\" (I4)",
+        snprintf(nm, sizeof nm, "[%s] reference-classifier simplify(derived) == \"%s\"",
                  mz->name, mz->simplify_oracle);
         CHECK(nm, path_is(&sol3, mz->simplify_oracle));
 
-        snprintf(nm, sizeof nm, "[%s] ref-lane replay(derived) reaches the goal (I4)",
+        snprintf(nm, sizeof nm, "[%s] reference-classifier replay(derived) reaches the goal",
                  mz->name);
         CHECK(nm, replay_maze(mz, classify_junction_ref, &sol3));
     }
@@ -670,10 +674,10 @@ static void run_maze_suite(const sim_maze_t *mz)
 
 // ---------------------------------------------------------------------------
 // THE HARDER MAZE — two boards, six junctions, five dead ends, one
-// 4-way. Transcribed arm-for-arm from MAZE_BUILD.md ("Harder maze
-// (Day 21–22)") — same provisional-oracle caveat as the starter table
-// above: as-designed, not as-built, and the as-built sketch reconciles
-// into here the day it exists:
+// 4-way. Transcribed arm-for-arm from its drawing, with the same
+// provisional-oracle caveat as the starter table above: as designed, not
+// as built, and the as-built measurements reconcile into here the day
+// they exist:
 //
 //                 F─────X5
 //                 │
@@ -685,10 +689,10 @@ static void run_maze_suite(const sim_maze_t *mz)
 //                 │
 //                 S  (start; robot facing north ↑)
 //
-// C is the course's only true 4-way crossing — the junction the GOAL-vs-
-// CROSS margin exists for. And the layout is still a TREE, which is the
-// left-hand rule's entire warranty (see decide_left_hand's contract).
-// Fourteen junction events before the goal: run_maze_suite() replays the
+// C is the only true 4-way crossing in either maze — the junction the
+// GOAL-vs-CROSS margin exists for. The layout is still a TREE, which is
+// the left-hand rule's entire warranty (see decide_left_hand's contract).
+// Fourteen junction events before the goal: run_maze_suite() replays its
 // full 12-check suite over this table exactly as it did the starter's.
 enum { H_S, H_A, H_B, H_C, H_D, H_E, H_F,
        H_X1, H_X2, H_X3, H_X4, H_X5, H_G, HARDER_NODE_COUNT };
@@ -715,63 +719,65 @@ static const sim_maze_t harder_maze = {
     .nodes           = harder_nodes,
     .start           = H_S,
     .start_heading   = NORTH,
-    .explore_oracle  = "LBLSLBLRBLSLLR",  // MAZE_BUILD.md's 14-move pencil walk
+    .explore_oracle  = "LBLSLBLRBLSLLR",  // the 14-move hand walk
     .simplify_oracle = "SRLR",
 };
 
 // ---------------------------------------------------------------------------
-// T3: THE MARGINAL WORLD — the sensor model after a bad week.
+// THE MARGINAL WORLD — the sensor model after a bad week.
 //
 // The clean palette above is the maze on build day. This one is the same
-// maze after entropy: matte tape gone shiny and dusty reads LIGHTER, and
-// scuffed paper or a dirt-caked half-covered shoulder sensor reads DARKER
-// — every reading drifts TOWARD the threshold, which is exactly the
-// direction that kills classifiers. The drift model keeps each reading on
-// the CORRECT side of the line (tape that truly crosses the threshold is
-// failed hardware — recalibrate; no classifier can save it), but with
-// ~40 counts of margin where the clean model had ~230.
+// maze after wear: matte tape gone shiny and dusty reads LIGHTER, while
+// scuffed paper and a dirt-caked half-covered shoulder sensor read
+// DARKER. Every reading drifts TOWARD the threshold, which is the
+// direction that kills classifiers. The drift stops short of crossing it
+// — tape that truly reads light is failed hardware and no classifier can
+// save it — but it leaves about 40 counts of margin where the clean
+// palette had about 230. Anything a classifier was getting away with on
+// clean tape shows up here.
 //
-//   SIM_TAPE_WORN — worst legible "dark": worn tape, still at or above
-//                   both classifiers' thresholds.
-//   SIM_SCUFF     — worst legible "light": grimy paper or a dirt-hot
-//                   shoulder, still below both.
+//   SIM_TAPE_WORN — the worst still-legible "dark": worn tape, at or
+//                   above both classifiers' thresholds.
+//   SIM_SCUFF     — the worst still-legible "light": grimy paper or a
+//                   dirt-hot shoulder, still below both.
 //
-// "Both" is load-bearing: the student brain reads JCT_DARK_THRESH
-// (tuning.h) while the I4 fallback reads its own fixed REF_DARK
-// (maze_logic_ref.c). REF_DARK is deliberately file-local, so SIM_REF_DARK
-// mirrors it here — if maze_logic_ref.c's number ever moves, move this
-// mirror too and let these guards re-audit the whole model. Same
-// fail-the-build-not-the-afternoon treatment as the clean palette's
-// guards above.
+// "Both" is load-bearing: classify_junction reads JCT_DARK_THRESH from
+// tuning.h, while classify_junction_ref reads its own fixed REF_DARK.
+// REF_DARK is deliberately file-local to maze_logic_ref.c, so SIM_REF_DARK
+// mirrors it here and the guards below re-check the whole palette against
+// both thresholds. Same fail-the-build treatment as the clean palette's
+// guards above: a model that quietly stopped straddling one threshold
+// would keep passing while proving nothing.
 #define SIM_TAPE_WORN 640
 #define SIM_SCUFF     560
 #define SIM_REF_DARK  600   // mirror of maze_logic_ref.c's REF_DARK,
                             // verified against the source below
 
-// THE MIRROR, MECHANIZED (audit AUDIT-19). Until FX4 the line above was
-// a hand copy that nothing compared to anything: the audit moved REF_DARK
-// from 600 to 700 in maze_logic_ref.c and the whole suite stayed green,
-// because the preprocessor never saw the real value — only this typed
-// duplicate of it. host_tests/Makefile now extracts the literal straight
-// out of maze_logic_ref.c and passes it in as REF_DARK_FROM_SOURCE, so
-// the two numbers meet at compile time and drift fails the BUILD.
+// THE MIRROR, MECHANIZED. The line above used to be a hand copy that
+// nothing compared to anything: moving REF_DARK from 600 to 700 in
+// maze_logic_ref.c left the whole suite green, because the preprocessor
+// never saw the real value — only this typed duplicate of it. The
+// Makefile now extracts the literal straight out of maze_logic_ref.c and
+// passes it in as REF_DARK_FROM_SOURCE, so the two numbers meet at
+// compile time and any drift fails the BUILD.
 //
-// This is the general shape of the problem, worth carrying past this
-// file: when a constant cannot be shared (no header, and maze_logic.h is
-// a frozen interface), you have a choice between a comment that asks a
-// human to remember and a build step that makes the machine check. Both
-// cost about six lines. Only one of them still works in six months.
+// The general shape of the problem is worth carrying past this file: when
+// a constant cannot be shared (no header, and maze_logic.h is a frozen
+// interface), the choice is between a comment asking a human to remember
+// and a build step making the machine check. Both cost about six lines.
+// Only one of them still works in six months.
 //
-// One chain, not two guards, and that is a preprocessor fact worth owning:
-// an UNDEFINED macro evaluates to 0 inside `#if`, so a hand build with no
-// -D would trip the "is not defined" belt and then trip the mismatch test
-// as well (600 != 0), printing a second error that blames a drifted mirror
-// when nothing has drifted. `#elif` asks the second question only once the
-// first has an answer, so each build failure names its own cause.
+// One #if/#elif chain, not two independent guards, and the reason is a
+// preprocessor detail: an UNDEFINED macro evaluates to 0 inside `#if`, so
+// a hand build with no -D would trip the "is not defined" belt and then
+// trip the mismatch test as well (600 != 0), printing a second error that
+// blames a drifted mirror when nothing has drifted. `#elif` asks the
+// second question only once the first has an answer, so each build
+// failure names its own cause.
 #ifndef REF_DARK_FROM_SOURCE
-#error "REF_DARK_FROM_SOURCE is not defined: build this file through host_tests/Makefile, which extracts REF_DARK from logic/maze_logic_ref.c so the SIM_REF_DARK mirror below can be verified instead of merely trusted."
+#error "REF_DARK_FROM_SOURCE is not defined: build this file through tests/logic/Makefile, which extracts REF_DARK from logic/maze_logic_ref.c so the SIM_REF_DARK mirror below can be verified instead of merely trusted."
 #elif SIM_REF_DARK != REF_DARK_FROM_SOURCE
-#error "SIM_REF_DARK no longer matches REF_DARK in logic/maze_logic_ref.c. That mirror is not decoration: the marginal palette below must straddle BOTH thresholds - the student brain reads JCT_DARK_THRESH, the I4 fallback lane reads REF_DARK - and the two guards under this line prove worn tape still reads dark and scuff still reads light for BOTH. Update the mirror to the new value, then re-read those guards and the ref-lane band-edge checks at the bottom of this file: moving REF_DARK can take the fallback classifier out of the model band without changing a single test that only walks clean tape."
+#error "SIM_REF_DARK no longer matches REF_DARK in logic/maze_logic_ref.c. That mirror is not decoration: the marginal palette below must straddle BOTH thresholds - classify_junction reads JCT_DARK_THRESH, classify_junction_ref reads REF_DARK - and the two guards under this line prove worn tape still reads dark and scuff still reads light for BOTH. Update the mirror to the new value, then re-read those guards and the reference band-edge checks at the bottom of this file: moving REF_DARK can take the reference classifier out of the model band without changing a single test that only walks clean tape."
 #endif
 
 #if SIM_TAPE_WORN < JCT_DARK_THRESH || SIM_TAPE_WORN < SIM_REF_DARK
@@ -814,14 +820,13 @@ static void marginal_snapshots(junction_t truth, bool l, bool s, bool r,
 }
 
 // The marginal run: every junction type the "never wrong on GOAL vs CROSS
-// vs T" clause covers, in the worst legible world — the real classifier
-// only. The fallback classifier is exempt BY CONTRACT, not by omission:
+// vs T" clause covers, in the worst legible world — classify_junction
+// only. classify_junction_ref is exempt BY CONTRACT, not by omission:
 // maze_logic_ref.c's own header bills it as "deliberately crude: one
 // hard-coded threshold, no tuning.h knobs, no margin logic, no refusal
-// gap beyond one case". Its job is to be the clean-model floor (the ref
-// lanes above hold it to exactly that), and asserting margin behavior
-// against a file that disclaims having any would be a test of the test,
-// not of the code.
+// gap beyond one case". Its job is to be the clean-model floor, which the
+// whole-maze walks above hold it to; asserting margin behavior against a
+// file that disclaims having any would test the test, not the code.
 static void run_marginal_suite(void)
 {
     printf("== marginal world (drift palette %d dark / %d light, thresh %d) ==\n",
@@ -900,15 +905,15 @@ static void run_marginal_suite(void)
 }
 
 // ---------------------------------------------------------------------------
-// FX4: THE REFERENCE LANE, UP CLOSE (audit AUDIT-19).
+// THE REFERENCE CLASSIFIER, UP CLOSE.
 //
 // Everything above proves classify_junction_ref the way the ROBOT uses it
-// — whole-maze walks over the clean palette. That is a coarse net, and
-// the audit measured exactly how coarse: it moved REF_DARK from 600 to
-// 700 in maze_logic_ref.c (a 100-count drift in the fallback lane's only
-// threshold) and every one of the simulator's checks stayed green. The
-// clean palette straddles both numbers — tape 830 dark, shoulder peak 520
-// light — so no junction in either maze changed its answer.
+// — whole-maze walks over the clean palette. That is a coarse net, and it
+// was measured: moving REF_DARK from 600 to 700 in maze_logic_ref.c (a
+// 100-count drift in that classifier's only threshold) left every one of
+// the simulator's checks green. The clean palette straddles both numbers
+// — tape 830 dark, shoulder peak 520 light — so no junction in either
+// maze changed its answer.
 //
 // A threshold nobody pins is a threshold that can drift until the day it
 // lands on a real reading. The two blocks below pin it from different
@@ -916,22 +921,23 @@ static void run_marginal_suite(void)
 // read the same photons the same way.
 static void run_ref_lane_suite(void)
 {
-    printf("== ref lane up close (I4 fallback: classify_junction_ref) ==\n");
+    printf("== reference classifier up close (classify_junction_ref) ==\n");
 
     // ---- (1) THE BAND EDGE. maze_logic_ref.c contains exactly one
-    // number — REF_DARK, hard-coded at 600, deliberately ("crude is this
-    // file's job": no knobs, no margin logic, so a student can read the
-    // whole classifier in one sitting and diff it against the real one).
-    // Nothing pinned WHERE that number sits, so this pair straddles it on
-    // the outermost left sensor: at 600 the latched arm counts as a
-    // branch, one count lower the arm evaporates and the evidence fits
-    // nothing at all — the ref lane's single refusal case.
+    // number — REF_DARK, hard-coded at 600, deliberately: no knobs and no
+    // margin logic, so the whole classifier reads in one sitting and
+    // diffs cleanly against the real one. Nothing pinned WHERE that
+    // number sits, so this pair straddles it on the outermost left
+    // sensor: at 600 the latched arm counts as a branch, one count lower
+    // the arm evaporates and the evidence fits nothing at all — that
+    // classifier's single refusal case.
     //
-    // The literals 600/599 are on purpose. The ref classifier exports no
-    // knob to spell them with (that IS the file's contract), so a test
-    // must name the number; if the number ever moves, the build-time
-    // mirror guard below fails FIRST and points at maze_logic_ref.c, and
-    // then these two lines say what the move costs.
+    // The literals 600/599 are on purpose. The reference classifier
+    // exports no knob to spell them with (that IS the file's contract),
+    // so a test must name the number. If the number ever moves, the
+    // build-time mirror guard above fails FIRST and points at
+    // maze_logic_ref.c, and then these two lines say what the move
+    // costs.
     {
         sensor_snapshot_t center = { { 60, 480, 830, 480, 60 } };
         sensor_snapshot_t on     = { { 600, 830, 830, 150, 150 } };
@@ -952,17 +958,16 @@ static void run_ref_lane_suite(void)
     // failure line prints both answers, so a disagreement names which
     // lane moved.
     //
-    // CLEAN ONLY, and the exclusion is the lesson. On the MARGINAL
+    // CLEAN ONLY, and the exclusion is the point. On the MARGINAL
     // palette (run_marginal_suite, above) the two classifiers diverge BY
-    // CONTRACT: the 3-dark rung is the refusal gap, where the student
-    // brain answers JCT_NONE because the same bytes have two true
-    // stories, while the ref lane — with no "I can't tell" in its
-    // vocabulary — confidently answers CROSS. That divergence is the
-    // entire value the real classifier adds over the baseline. An
-    // agreement assertion over there would not catch a bug; it would
-    // demand that the student classifier get DUMBER to keep the test
-    // green, which is how a test suite starts steering the design the
-    // wrong way.
+    // CONTRACT: the 3-dark rung is the refusal gap, where classify_junction
+    // answers JCT_NONE because the same bytes have two true stories, while
+    // classify_junction_ref — with no "I can't tell" in its vocabulary —
+    // confidently answers CROSS. That divergence is the entire value the
+    // real classifier adds over the baseline. An agreement assertion over
+    // there would not catch a bug; it would demand that classify_junction
+    // get DUMBER to keep the test green, which is how a test suite starts
+    // steering the design the wrong way.
     static const struct {
         junction_t truth;
         bool       l, s, r;
@@ -986,10 +991,10 @@ static void run_ref_lane_suite(void)
 
         char nm[96];
         snprintf(nm, sizeof nm,
-                 "[head-to-head] %s: student and ref both read it (clean)",
+                 "[head-to-head] %s: primary and reference agree (clean)",
                  jct_label(clean_cases[i].truth));
         if (mine != clean_cases[i].truth || ref != clean_cases[i].truth) {
-            printf("  head-to-head at %s: student said %s, ref said %s\n",
+            printf("  head-to-head at %s: primary said %s, reference said %s\n",
                    jct_label(clean_cases[i].truth), jct_label(mine),
                    jct_label(ref));
         }
@@ -1001,9 +1006,9 @@ static void run_ref_lane_suite(void)
 int main(void)
 {
     run_maze_suite(&starter_maze);
-    run_maze_suite(&harder_maze);   // T2 left this hook; T3 cashes it in
-    run_marginal_suite();
-    run_ref_lane_suite();           // FX4: the ref lane's own threshold
+    run_maze_suite(&harder_maze);
+    run_marginal_suite();           // the same walks on worn tape
+    run_ref_lane_suite();           // the reference classifier's threshold
 
     printf("\n%d passed, %d failed\n", t_pass, t_fail);
     return t_fail != 0;

@@ -1,41 +1,48 @@
 #!/usr/bin/env python3
-"""check_decode.py — can the telemetry pipeline decode the smoke fixture?
+"""check_decode.py — does the telemetry CSV fixture decode end to end?
 
-smoke.csv is a synthetic LOG DUMP of one walker junction pass — hand-written,
-never captured: no robot produced those numbers, and none of them is evidence
-of anything the hardware does. Its FORMAT is the post-T1 firmware's dump: the
-two one-shot snapshot tick kinds ('J' = kind 6, the edge-latched `before` at
-JCT_DETECT; 'A' = kind 7, the at_center read at CREEP_END) and the
-EV_RESUME=33 event that marks the end of a backtrack recovery. FX2 extended
-it in place — same 3-line frame, same rows — with the self-identification
-meta (the ops knob set on line 2; batt_mv= and the cal window on line 3) and
-a RESUME.b that carries the suppressed-resume span in mm.
+smoke.csv is the fixture that pins the telemetry CSV format, and this
+script checks both ends of that format:
 
-ONE DELIBERATE DEVIATION from the firmware's bytes, and it must survive every
-future edit: line 1 carries a SYNTHETIC FIXTURE banner after the version
-token. A shared CSV travels without its context, and this is the only CSV in
-the repo (capstone/validation/ is empty until a ladder stage passes), so a
-reader who meets it must not be able to mistake it for a run. The banner is
-placed inside line 1's existing text on purpose — the CSV contract (I3) fixes
-the frame at three '#' header lines, and the parser drops line 1's body
-wholesale once it starts with "3pi2040" (plot_telemetry.py:85–87), so this is
-the one spot that carries prose without breaking the frame. Do NOT promote it
-to a fourth header line.
+  * the host decoder (tools/plot_telemetry.py) must parse the fixture
+    without errors and must treat the snapshot rows J and A as TICK rows
+    with their own phase names — and must NOT let them open phase-shading
+    spans, because a snapshot is an instant, not a phase, and shading a
+    one-row "span" would paint time on the plot that the robot never
+    spent in any phase;
+  * the firmware encoder (src/telemetry.h and src/telemetry.c, read as
+    text rather than executed) must be able to PRODUCE those rows at all.
+    The plotter passes any event name through verbatim, so "UNK33" can
+    only be born in the firmware's range checks and name tables.
 
-The fixture is the CONTRACT (I3); this script checks both ends of it:
+The format is APPEND-ONLY: tick kinds and event codes may be added at the
+end, never renumbered or reordered, because a renumbered code silently
+re-labels every capture taken before the change. Several checks below
+exist only to hold that line.
 
-  * the host decoder (plot_telemetry.py) must treat J/A as tick rows with
-    their own phase names, and must NOT let them open phase-shading spans —
-    a snapshot is an instant, not a phase; shading a one-row "span" would
-    paint time on the plot that the robot never spent in any phase;
-  * the firmware encoder (src/telemetry.c, checked statically) must be able
-    to PRODUCE these rows at all — the dump's range checks and name tables
-    are where "UNK33" is born, never the plotter.
+smoke.csv is a synthetic log dump of one junction pass — hand-written,
+never captured. No robot produced those numbers, and none of them is
+evidence of anything the hardware does. Its FORMAT is the firmware's: the
+two one-shot snapshot tick kinds ('J' = kind 6, the edge-latched `before`
+reading at JCT_DETECT; 'A' = kind 7, the at_center read at CREEP_END), the
+EV_RESUME=33 event that marks the end of a backtrack recovery, the
+self-identifying meta (the ops knob set on line 2; batt_mv= and the
+calibration window on line 3) and a RESUME.b carrying the suppressed-resume
+span in mm.
+
+ONE DELIBERATE DEVIATION from the firmware's bytes, and it must survive
+every future edit: line 1 carries a SYNTHETIC FIXTURE banner after the
+version token. A shared CSV travels without its context, so a reader who
+meets this file must not be able to mistake it for a real run. The banner
+sits inside line 1's existing text on purpose — the format fixes the frame
+at three '#' header lines, and the parser drops line 1's body wholesale
+once it starts with "3pi2040" — so this is the one spot that carries prose
+without breaking the frame. Do NOT promote it to a fourth header line.
 
 Stdlib only, no matplotlib: plot_telemetry imports it lazily inside
 plot_run(), so importing the module for its parser is safe on any machine.
 
-Run:  make -C capstone/testdata check   (or: python3 check_decode.py)
+Run:  make -C tests/telemetry check   (or: python3 check_decode.py)
 """
 import io
 import os
@@ -55,9 +62,10 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(REPO / "tools"))
 import plot_telemetry as pt  # noqa: E402  (module top is stdlib-only)
 
-# The 17 event names the pre-T1 firmware already dumps, in ring order.
-# APPEND-ONLY (I3): a renumbered or reordered name silently re-labels every
-# CSV captured before the change — history must stay decodable.
+# The 17 event names the firmware dumped before RESUME was appended, in
+# ring order. APPEND-ONLY: a renumbered or reordered name silently
+# re-labels every CSV captured before the change, and history has to stay
+# decodable.
 ORIGINAL_EV_NAMES = [
     "RUN_START", "FOLLOW_START", "BLIND_END", "JCT_DETECT", "DEADEND",
     "LOSS", "BT_START", "BT_FOUND", "BT_FAIL", "CREEP_START", "CREEP_END",
@@ -112,8 +120,8 @@ def main():
     # A snapshot row is one instant inside some other phase — letting it
     # open a span would shade time the robot never spent anywhere.
     # (Passes vacuously while J/A aren't ticks at all; it exists to bite in
-    # the halfway-green state where TICK_LETTERS grew but the span filter
-    # didn't — the slice review calls a J/A span MAJOR.)
+    # the halfway state where TICK_LETTERS grew but the span filter did
+    # not.)
     t0 = ticks[0]["t"] if ticks else 0
     spans = pt._phase_spans(ticks, lambda ms: (ms - t0) / 1000.0)
     span_letters = {s[2] for s in spans}
@@ -150,34 +158,34 @@ def main():
           "fixture carries the RESUME event (fixture self-check)",
           "smoke.csv must model the post-fix dump")
 
-    # ---- the dump must self-identify (AUDIT-10 / AUDIT-11) -----------------
-    # A CSV gets shared without its robot. If the file can't name its own
-    # knob values (line 2) and its battery + calibration window (line 3),
-    # every triage question becomes "well, what was it built with?" —
-    # unanswerable three flashes later. The fixture models the post-FX2
-    # dump, so these tokens must parse out of it.
+    # ---- the dump must self-identify --------------------------------------
+    # A CSV gets shared without its robot. If the file cannot name its own
+    # knob values (line 2) and its battery and calibration window (line 3),
+    # every triage question becomes "what was it built with?" —
+    # unanswerable three flashes later. The fixture carries those tokens,
+    # so they must parse back out of it.
     ops = ("replay", "arrival", "brake_mm", "brake_ms", "turn_kp",
            "dark_thresh", "goal_min_dark", "creep_mm", "think_ms",
            "cal_min_span")
     missing_ops = [t for t in ops if not isinstance(meta.get(t), int)]
     check(not missing_ops,
-          "knob line names the ops knob set (AUDIT-11)",
+          "knob line names the ops knob set",
           f"missing/non-int tokens: {missing_ops}")
     check(isinstance(meta.get("batt_mv"), int),
-          "dump-facts line carries batt_mv= (AUDIT-10)",
+          "dump-facts line carries batt_mv=",
           f"meta['batt_mv'] = {meta.get('batt_mv')!r}")
     spans = pt._cal_spans(meta)
     check(spans is not None and len(spans) == 5,
-          "cal_min=/cal_max= parse to five per-sensor spans (AUDIT-3 capture half)",
+          "cal_min=/cal_max= parse to five per-sensor spans",
           f"_cal_spans -> {spans!r}")
 
     # ---------------- negative cases: the parser must OBJECT ----------------
     # A decode check that only ever eats a perfect fixture proves nothing
-    # about I3 enforcement — feed the parser deliberate defects and assert
-    # it FLAGS each one. The defects are in-script variants of the REAL
-    # fixture, written to throwaway temp files (the parser's interface is a
-    # path): a defect that earned a permanent tracked fixture would have
-    # earned too much.
+    # about the parser's defenses, so each variant below feeds it a
+    # deliberate defect and asserts it FLAGS that defect. The variants are
+    # built in memory from the REAL fixture and written to throwaway temp
+    # files, because the parser's interface is a path; a permanent tracked
+    # fixture per defect would be more than they are worth.
     print("== negative cases: parser vs deliberate defects ==")
     smoke_lines = SMOKE.read_text().splitlines(keepends=True)
     donor = "2388,B,48,300,812,300,56,0,0,1800,1800\n"
@@ -220,8 +228,8 @@ def main():
     # (3) Clean truncation: capture stopped between rows, '# end' never
     # arrived. Every surviving row parses — so before the complete flag
     # existed, this file was INDISTINGUISHABLE from a whole dump (errors=0
-    # both). The stance (TELEMETRY.md §3): '# end' is the completeness
-    # receipt; its absence must be detectable, and the rows still returned.
+    # for both). '# end' is the completeness receipt: its absence must be
+    # detectable, and the rows must still be returned.
     _, tk, _, _, er, comp = parse_variant(smoke_lines[:-1])
     check(comp is False and er == 0 and len(tk) == n_ticks_good,
           "clean truncation (no '# end') is DETECTABLE: complete=False, "
@@ -236,22 +244,21 @@ def main():
           "mid-row truncation: partial row FLAGGED and complete=False",
           f"complete={comp!r}, errors={er} (want 1)")
 
-    # ---- AUDIT-9 guard: saturation is judged PER RUN, from RUN_START.b -----
-    # This slice's headline fix, and the one thing here that a future edit
-    # could quietly undo. "Saturated" means the PID asked for more steer
-    # than the base speed can absorb, so the threshold is THIS run's base —
-    # which each run announces in RUN_START.b. A replay lap steps that base
-    # above the meta line's explore= speed, so judging it against the meta
-    # line manufactures saturation out of healthy steering. A demo CSV
-    # proves the fix once; this asserts it on every `make check`, because
-    # the regression is silent — the census stays GREEN while the number
-    # lies.
-    print("== AUDIT-9 guard: stepped-base run judged against RUN_START.b ==")
+    # ---- saturation is judged PER RUN, from RUN_START.b --------------------
+    # The one summary statistic here that a future edit could quietly undo.
+    # "Saturated" means the PID asked for more steer than the base speed
+    # can absorb, so the threshold is THIS run's base — which each run
+    # announces in RUN_START.b. A replay lap steps that base above the meta
+    # line's explore= speed, so judging it against the meta line
+    # manufactures saturation out of perfectly healthy steering. The
+    # regression is silent: every other check stays green while the number
+    # lies, which is why it is asserted on every `make check`.
+    print("== stepped-base guard: run judged against RUN_START.b ==")
     # Real header (so explore=1800 is the fixture's own knob line), then a
     # REPLAY run started at base 3500 whose five F ticks straddle BOTH
     # thresholds: all five clear 1800, only two clear 3500. The two
-    # readings are 40.0% (honest) and 100.0% (the AUDIT-9 bug) — far
-    # enough apart that no rounding can confuse them.
+    # readings are 40.0% (honest) and 100.0% (the bug) — far enough apart
+    # that no rounding can confuse them.
     stepped = smoke_lines[:4] + [
         "1000,RUN_START,0,0,0,0,0,4,3500,0,0\n"
     ] + [
@@ -269,7 +276,7 @@ def main():
           "no per-run segment line — grouping regressed to one flat bucket")
     check(len(sat_lines) == 1 and "base=3500, RUN_START.b" in sat_lines[0]
           and "40.0% of ticks" in sat_lines[0],
-          "stepped-base run: threshold is its own RUN_START.b (AUDIT-9)",
+          "stepped-base run: threshold is its own RUN_START.b",
           f"saturation line(s) = {sat_lines!r}")
     check(not any("explore" in ln or "100.0%" in ln for ln in sat_lines),
           "stepped-base run: the meta explore= reading is NOT what it prints",
@@ -296,7 +303,7 @@ def main():
           f"got {defines.get('EV_RESUME')}")
     check(defines.get("TEL_TICK_FOLLOW") == 1 and defines.get("TEL_TICK_BT") == 5
           and defines.get("EV_RUN_START") == 16 and defines.get("EV_FAULT") == 32,
-          "existing kind/event numbers unchanged (I3: append-only)")
+          "existing kind/event numbers unchanged (append-only)")
 
     # Letter map: dump prints "?FBCTK..."[kind] for tick rows.
     m = re.search(r'"\?FBCTK[A-Z]*"', ct)
@@ -306,7 +313,7 @@ def main():
           f"letter map = {letter_map!r}")
 
     # Range checks: a kind outside them dumps as UNKn no matter what the
-    # tables say. (SLICE_PLAN §7 drift 2: the EVENT bound is the easy miss.)
+    # tables say. The EVENT bound is the easy one to forget.
     m = re.search(r"kind\s*<=\s*(TEL_TICK_\w+)", ct)
     tick_bound = defines.get(m.group(1)) if m else None
     check(tick_bound is not None and tick_bound >= 7,
@@ -332,8 +339,9 @@ def main():
           f"ev_names has {len(fw_names)} entries: "
           f"{fw_names[17] if len(fw_names) > 17 else 'nothing'} at index 17")
 
-    # The pipeline statement: every rec name the fixture uses must be one
-    # the (fixed) firmware can actually emit — the fixture IS a post-fix dump.
+    # Every rec name the fixture uses must be one the firmware can
+    # actually emit: the fixture claims to be a dump, so it has to be a
+    # dump the firmware could have produced.
     if ev_bound is not None and fw_names:
         emittable = {fw_names[k - 16] for k in
                      range(16, min(ev_bound, 15 + len(fw_names)) + 1)}

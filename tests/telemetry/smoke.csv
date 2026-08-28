@@ -1,4 +1,4 @@
-# 3pi2040 telemetry v1 --- SYNTHETIC FIXTURE, NOT A ROBOT RUN: hand-written to model a dump so the decode chain can be tested without hardware. No robot produced these numbers. Real captures live in logs/ and, once a ladder stage passes, capstone/validation/.
+# 3pi2040 telemetry v1 --- SYNTHETIC FIXTURE, NOT A ROBOT RUN: hand-written to model a dump so the decode chain can be tested without hardware. No robot produced these numbers, and none of them is evidence of anything the hardware does. Real captures live in logs/.
 # period_us=2000 kp=90 kd=3000 explore=1800 creep=1200 turnmax=2500 outer_thresh=600 lost_thresh=300 blind_mm=30 deadend_p_max=600 bt_speed=1200 counts_per_mm_x100=356 replay=2500 arrival=2500 brake_mm=20 brake_ms=80 turn_kp=140 dark_thresh=600 goal_min_dark=4 creep_mm=45 think_ms=400 cal_min_span=300
 # records=280 wrapped=0 batt_mv=5804 cal_min=96,84,102,88,92 cal_max=812,796,844,808,800
 t_ms,rec,s0,s1,s2,s3,s4,a,b,left,right
