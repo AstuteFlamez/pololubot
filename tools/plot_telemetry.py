@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """plot_telemetry.py — turn a flight-recorder CSV dump into pictures.
 
-See capstone/TELEMETRY.md for the full story: how the ring buffer works,
-how to capture a log off the robot, and how to read what comes out of
-here. This file only needs stdlib to parse and summarize; matplotlib is
-imported lazily so `--summary` still works on a machine that doesn't
-have it installed.
+The CSV format this reads is specified in src/telemetry.h; tools/
+capture_log.sh captures a dump off the robot. Parsing and summarizing
+need stdlib only — matplotlib is imported lazily, so `--summary` still
+works on a machine that does not have it installed.
 
 Usage:
     python3 plot_telemetry.py run1.csv                # writes run1.png
@@ -36,7 +35,7 @@ JCT_NAMES = ["LEFT_ONLY", "RIGHT_ONLY", "STRAIGHT_LEFT", "STRAIGHT_RIGHT",
              "T", "CROSS", "DEAD_END", "GOAL", "NONE"]
 # run_mode_t from src/feedback.h, in enum order — decodes RUN_START's a.
 # A maze run is always EXPLORE (2) or REPLAY (4); the others exist because
-# the firmware logs whatever mode started the run, not what we expect.
+# the firmware logs whatever mode started the run, not the expected one.
 MODE_NAMES = ["DIAG", "CALIBRATE", "EXPLORE", "SOLVED", "REPLAY", "DONE",
               "SPARE", "LOGDUMP"]
 
@@ -133,9 +132,8 @@ def parse_csv(path):
 
 def _cal_spans(meta):
     """Per-sensor calibration spans from the dump-facts line's cal_min=/
-    cal_max= comma-lists. None when the dump predates them (pre-FX2
-    firmware) or the lists don't parse — absence is not an error, just an
-    older CSV."""
+    cal_max= comma-lists. None when the dump predates those tokens or the
+    lists don't parse — absence is not an error, just an older CSV."""
     lo, hi = meta.get("cal_min"), meta.get("cal_max")
     if lo is None or hi is None:
         return None
@@ -224,7 +222,8 @@ def print_summary(meta, ticks, events, raw_meta_line, errors):
                   f"max|p| = {max(abs_p)}")
             if base is None:
                 # Base unknown — fall back to the meta line's explore speed,
-                # and SAY so: a fallback judged silently is AUDIT-9 again.
+                # and SAY so: a threshold substituted silently is a lie the
+                # reader has no way to catch.
                 base = meta.get("explore")
                 base_src = "meta explore= — fallback, run's own base unknown"
             if isinstance(base, int) and base > 0:
@@ -235,9 +234,9 @@ def print_summary(meta, ticks, events, raw_meta_line, errors):
                 # No usable threshold: RUN_START.b was 0, or the fallback
                 # meta line never carried explore=. Printing nothing would
                 # leave the tick line above looking like the whole story
-                # and read as "no saturation" — the same silent-judgement
-                # failure as AUDIT-9, just quieter. Say the stat is
-                # missing and why, so the reader knows to go get the base.
+                # and read as "no saturation" — the same silent judgement,
+                # just quieter. Say the stat is missing and why, so the
+                # reader knows to go get the base.
                 print(f"    steering saturation: no stat — this run's base "
                       f"reads {base!r}"
                       + (f" ({base_src})" if base_src else "")
@@ -417,13 +416,13 @@ def main():
         plot_run(meta, ticks, events, out_path, csv_path.name)
     except ImportError:
         # Homebrew's Python refuses a bare pip install (PEP 668: the
-        # interpreter belongs to Homebrew, not you) — the venv route below
-        # is the manual's one-time setup (TELEMETRY.md §4), not a detour.
+        # interpreter belongs to Homebrew), so the venv below is the
+        # supported route, not a detour.
         print("matplotlib not installed — one-time setup, from the repo root:\n"
               "  python3 -m venv .venv\n"
               "  .venv/bin/pip install matplotlib\n"
               "then plot with the venv's interpreter:\n"
-              "  .venv/bin/python3 capstone/plot_telemetry.py <csv> --summary\n"
+              "  .venv/bin/python3 tools/plot_telemetry.py <csv> --summary\n"
               "(--summary output above still works without it.)")
 
 

@@ -1,8 +1,8 @@
-// telemetry.c — the ring behind telemetry.h (the WHY of recording at all
-// lives in that header). 8192 records × 16 bytes = 128 KB of the RP2040's
-// 264 KB SRAM, spent deliberately: nothing else in this firmware wants
-// that RAM, and history you didn't record is the one debug tool you can't
-// add after the crash.
+// telemetry.c — the ring behind telemetry.h, which carries the CSV format
+// spec and the reason for recording at all. 8192 records x 16 bytes =
+// 128 KB of the RP2040's 264 KB SRAM, spent deliberately: nothing else in
+// this firmware wants that RAM, and history that was never recorded is the
+// one debug tool that cannot be added after the crash.
 
 #include <stdio.h>
 
@@ -113,16 +113,14 @@ void telemetry_dump(void)
     uint32_t start = wrapped ? head : 0;
 
     printf("# 3pi2040 telemetry v1\n");
-    // The knob line: every tuning number that changes how a ROW of this
-    // dump is READ — speeds (the saturation and duty baselines), the
-    // thresholds that decided what counted as a junction, a goal, or a
-    // loss, and the geometry that turns counts into millimetres. Not all
-    // of tuning.h: the bar for adding a token is "would a reader interpret
-    // some row differently if this value were different?". A shared CSV
-    // must name its own build — the robot that produced it may be three
-    // flashes ahead by the time anyone reads the file. However long it
-    // grows, it stays ONE '#' line: the 3-line header frame is contract
-    // (I3), and every decoder counts on it.
+    // Header line 2, the knob line: not all of tuning.h, only the numbers
+    // that change how a ROW is READ — the speeds that set the saturation
+    // and duty baselines, the thresholds that decided what counted as a
+    // junction, a goal or a loss, and the geometry that turns counts into
+    // millimetres. The bar for adding a token: would a reader interpret
+    // some row differently if this value were different? However long the
+    // list grows it stays ONE '#' line — the three-line header frame is
+    // contract, and every decoder counts on it.
     printf("# period_us=%d kp=%d kd=%d explore=%d creep=%d turnmax=%d"
            " outer_thresh=%d lost_thresh=%d blind_mm=%d deadend_p_max=%d"
            " bt_speed=%d counts_per_mm_x100=%d"
@@ -135,10 +133,10 @@ void telemetry_dump(void)
            SPEED_REPLAY, SPEED_ARRIVAL, ARRIVAL_BRAKE_MM, ARRIVAL_BRAKE_MS,
            TURN_KP, JCT_DARK_THRESH, GOAL_MIN_DARK, CREEP_MM, THINK_PAUSE_MS,
            CAL_MIN_SPAN);
-    // The dump-facts line: what is true of THIS dump, as opposed to the
-    // build (line 2 above) — how much history survived, whether the ring
-    // wrapped, and, when main.c handed them in, the battery at dump time
-    // and the calibration window the sensor columns were scaled by.
+    // Header line 3, the dump-facts line: what is true of THIS dump rather
+    // than of the build — how much history survived, whether the ring
+    // wrapped, and, when main.c handed them in, the battery and the
+    // calibration window as they stood at dump time.
     if (have_dump_ctx) {
         printf("# records=%lu wrapped=%d batt_mv=%u"
                " cal_min=%u,%u,%u,%u,%u cal_max=%u,%u,%u,%u,%u\n",

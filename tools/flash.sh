@@ -3,8 +3,8 @@
 #
 # How this works: the RP2040's boot ROM contains a USB bootloader (BOOTSEL
 # mode) that shows up as a fake flash drive named RPI-RP2. Copy a .uf2 file
-# onto it and the ROM writes your program into flash and reboots. Two ways in:
-#   1. Our programs all enable USB stdio; opening their serial port at exactly
+# onto it and the ROM writes that program into flash and reboots. Two ways in:
+#   1. These programs all enable USB stdio; opening the serial port at exactly
 #      1200 baud is a magic knock that reboots into BOOTSEL. (This script.)
 #   2. Hardware fallback that ALWAYS works, even with broken firmware:
 #      hold button B (the BOOTSEL pin!) while pressing RESET.
@@ -39,4 +39,4 @@ fi
 [ -d "$VOL" ] || { echo "RPI-RP2 drive never appeared. Hold button B + press RESET, rerun."; exit 1; }
 
 cp "$UF2" "$VOL/"
-echo "flashed $(basename "$UF2") — robot is rebooting into your code"
+echo "flashed $(basename "$UF2") — robot is rebooting into the new program"
