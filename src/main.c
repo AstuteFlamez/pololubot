@@ -1,16 +1,14 @@
-// main.c — the capstone shell: mode machine, menu, and the run loops.
+// main.c — application shell: mode machine, button menu, run loops.
 //
 // This firmware is a maze SOLVER: it calibrates, explores with the
 // left-hand rule (follow → creep → classify → decide → record → move),
 // collapses the recorded detours into the shortest route, and replays
-// that route junction-by-junction to the goal. The thinking lives in
-// logic/maze_logic.c — pure, host-tested C — and is wired in at the
-// seams below; this file only orchestrates. The firmware shipped as a
-// brainless "walker" (bounce at every junction) before the brain landed;
-// the classifier seam below still lets it fall back to the reference
-// classifier (comment out USE_MY_CLASSIFIER in tuning.h).
+// that route junction-by-junction to the goal. The decision logic lives
+// in logic/maze_logic.c — pure, host-tested C — and is called from the
+// run loops below; this file only orchestrates I/O, sequencing, and the
+// screens.
 //
-// Button UX (everywhere):
+// Buttons, in every mode:
 //   C short tap   → next menu item
 //   C long press  → GO (run the selected mode)     A → also GO
 //   ANY button during a run → motors off, back to the menu. Always.
@@ -34,11 +32,11 @@
 #include "feedback.h"
 #include "lap_timer.h"
 
-// The classifier seam: USE_MY_CLASSIFIER (tuning.h) picks which brain the
-// firmware thinks with. The reference classifier stays compiled in as the
-// permanent fallback — comment the flag out and everything below runs
-// unchanged, because the flag swaps the classifier ONLY, never the
-// decision layer. The simulator proves both lanes on every host run.
+// USE_MY_CLASSIFIER (tuning.h) selects which junction classifier runs.
+// The reference classifier stays compiled in as a permanent fallback:
+// comment the flag out and everything below is unaffected, because the
+// flag swaps the classifier ONLY, never the decision layer. The host
+// simulator exercises both classifiers on every run.
 #ifdef USE_MY_CLASSIFIER
 #define CLASSIFY classify_junction
 #else
@@ -70,6 +68,64 @@ static void wait_for_button(void)
     hw_buttons_wait_release();
 }
 
+// Stop, log, show the reason, wait for acknowledgement.
+//
+// The fault string reaches the OLED and nowhere else: EV_FAULT carries no
+// code (a = b = 0), so triage means matching what the screen said against
+// the shape the ring recorded. Every string this firmware can show, and the
+// dump signature that goes with it:
+//
+//   FIRST, the preflight phantom. The three preflight refusals below call
+//   fault() before either runner resets the ring, so a refusal appends a
+//   lone FAULT row onto whatever the PREVIOUS run left behind — a run whose
+//   own story may have ended cleanly. A trailing FAULT with no fresh
+//   RUN_START opening a new run is a refusal at the menu, not a crash mid
+//   run, and the last RUN_START in the dump may not even be the mode that
+//   got refused. Do not debug the previous run for a crash it never had.
+//
+//   "battery dead"        preflight. Cross-check batt_mv in the dump-facts
+//                         header: at or below BATT_REFUSE_MV earns it.
+//   "run CALIBRATE 1st"   preflight. cal_min/cal_max spans near zero mean
+//                         no sweep has run since boot.
+//   "no gyro cal"         preflight. Nothing in the ring measures gyro bias;
+//                         the screen is the only witness.
+//   "lost: 10s no jct"    RUN_START, then RUN_WATCHDOG_MS of F rows with no
+//                         JCT_DETECT, ending TIMEOUT [phase=F]. Drove off the
+//                         maze, or a junction never read as one.
+//   "line LOST"           recovery exhausted, in one of three shapes.
+//                         Budget spent: a final LOSS with no BT_START after
+//                         it. Retrace failed: LOSS, BT_START, K rows,
+//                         BT_FAIL. Demoted find: BT_FOUND (possibly with
+//                         nudge C rows) then BT_FAIL — what it refound did
+//                         not survive the settle re-check.
+//   "creep stalled"       CREEP_START, then C rows whose a (progress in
+//                         counts) stops climbing, then TIMEOUT [phase=C].
+//                         Jammed wheel, blocked chassis, or a flipped
+//                         encoder sign.
+//   "classify: NONE"      CLASSIFY [NONE]. The J/A snapshot pair just above
+//                         it is the exact evidence the classifier refused.
+//                         A dead-end-shaped arrival has an A row and no J.
+//   "path overflow"       the 65th recorded move (PATH_MAX_MOVES is 64):
+//                         a long explore ending CLASSIFY then FAULT with no
+//                         TURN_START between them.
+//   "illegal move"        CLASSIFY reporting a confident junction, then
+//                         FAULT with no TURN_START — the move byte itself
+//                         was rot. Same immediate shape as path overflow,
+//                         since both checks run inside the arrival verdict,
+//                         before the think pause. Tell them apart by the
+//                         junction count: overflow needs 64 moves behind it,
+//                         an illegal move can fire at junction one.
+//   "turn timeout"        TURN_START with no TURN_END, T rows whose angle
+//                         error (a, deg x10) stalls short of zero, then
+//                         TIMEOUT [phase=T]. Check batt_mv for sag before
+//                         reaching for TURN_KP.
+//   "replay:not goal"     path spent, but the last CLASSIFY reads a
+//                         confident non-GOAL junction. Wrong maze, drifted
+//                         path, or a miscount upstream.
+//   "goal too early"      CLASSIFY [GOAL] with moves still remaining.
+//   "replay:dead end"     DEADEND (an honest line end, so no J row), creep,
+//                         CLASSIFY [DEAD_END]. The solved path steered into
+//                         a corridor end it should never have reached.
 static void fault(const char *msg)
 {
     drive_stop();
@@ -107,17 +163,14 @@ static void countdown(void)
     ui_flush_now();
 }
 
-// The fault screen for one verdict code. The judging itself is pure and
-// host-tested (logic/maze_logic.c's arrival-verdict block); this map is
-// the part that cannot live there, because a 16-column OLED string is
-// I/O and logic/ owns no screens. Splitting it this way is also what
-// proves the extraction changed nothing: every string below is the same
-// byte sequence the inlined `if` chains passed to fault().
+// OLED text for one arrival verdict. The judging itself is pure and
+// host-tested (the arrival-verdict block in logic/maze_logic.c); only
+// this mapping lives here, because a 16-column OLED string is I/O and
+// logic/ owns no screens.
 //
-// The belt: PROCEED and SUCCESS are not faults and never reach here, but
-// a switch must stay total, and "illegal move" is the least-wrong answer
-// for a verdict code this seam cannot act on — its own comment already
-// names a decision table as one of the two places that failure lives.
+// ARRIVE_PROCEED and ARRIVE_SUCCESS are not faults and never reach here,
+// but the switch must stay total: "illegal move" is the least-wrong text
+// for a verdict code this layer cannot act on.
 static const char *verdict_fault_text(arrival_verdict_t v)
 {
     switch (v) {
@@ -130,12 +183,12 @@ static const char *verdict_fault_text(arrival_verdict_t v)
     }
 }
 
-// Turn a decided move into motion. 'S' is free; turns can fault. Both
-// run loops screen the byte through the arrival verdict first (its
-// legality column), so the default below is unreachable belt — kept
-// because a switch over a char must stay total, and returning the
-// timeout fault is the least-wrong answer if a future caller forgets
-// the screen.
+// Turn a decided move into motion. MOVE_STRAIGHT costs nothing (the
+// follower is already pointed the right way); turns can fault. Both run
+// loops screen the move byte through the arrival verdict first, so the
+// default below is unreachable in practice — it is kept because a switch
+// over a char must stay total, and reporting a timeout is the safest
+// answer if a future caller skips that screening.
 static drive_status_t execute_move(move_t m)
 {
     switch (m) {
@@ -148,8 +201,9 @@ static drive_status_t execute_move(move_t m)
 }
 
 // ------------------------------------------------------------------- DIAG
-// The bench dashboard: live sensors, calibration window, encoders, gyro,
-// battery. First stop every session; last stop before blaming hardware.
+// Bench dashboard: live line sensors, calibration state, encoder counts,
+// gyro angle and battery, redrawn until any button is pressed. Motors
+// stay off, so flushing the screen inside the loop is safe.
 static void run_diag(void)
 {
     on_state_change(MODE_DIAG);
@@ -239,10 +293,10 @@ static void run_calibrate(void)
     }
     ui_flush_now();
     feedback_beep(hw_line_cal_ok() ? NOTE_C6 : NOTE_C4, 150);
-    // Hold the screen until a button (run_solved's pattern): these five
-    // spans are the V1 ritual's evidence — "all >=CAL_MIN_SPAN" is a
-    // read-and-judge step, and the old 1.35 s flash was gone before a
-    // human could read one number, let alone five.
+    // Hold the screen until a button press. These five spans are the
+    // evidence that the sweep worked (every span >= CAL_MIN_SPAN), and a
+    // timed flash was gone before one number could be read, let alone
+    // five.
     wait_for_button();
 }
 
@@ -260,15 +314,13 @@ static run_mode_t run_explore(void)
 
     path_raw.len = 0;
     path_raw.overflow = false;
-    // No lap clock here, on purpose: the scoreboard (lap_timer) is the
-    // REPLAY record. Before the FX1 fix, an explore that reached the goal
-    // seeded `best` with its cautious stroll — so the first replay lap,
-    // which is faster than exploring by construction, would always beat
-    // it: a guaranteed "NEW!" and an unearned fanfare. That is a defect
-    // read off the code, not a run anyone watched.
-    // run_replay owns lap_start/lap_stop (the chain is documented
-    // there); an explore's duration lives in the flight recorder's
-    // timestamps if anyone asks.
+    // No lap clock here, on purpose: lap_timer records REPLAY runs only.
+    // An explore that reached the goal would seed `best` with its
+    // cautious stroll, and the next replay — faster than exploring by
+    // construction — would always beat it, for a guaranteed "NEW!" and an
+    // unearned new-best melody. run_replay owns lap_start/lap_stop (chain
+    // documented there); an explore's duration is recoverable from the
+    // telemetry timestamps.
 
     for (;;) {
         sensor_snapshot_t before, at_center;
@@ -287,17 +339,17 @@ static run_mode_t run_explore(void)
         junction_t j = CLASSIFY(&before, &at_center);
         telemetry_event(EV_CLASSIFY, (int16_t)j, 0);
 
-        // The brain (Day 19's seam, live): the left-hand rule picks the
-        // move, the arrival verdict judges what to do with it, the path
-        // records it, the show announces it — and only then does the
-        // robot act. Both halves are pure and host-tested; this loop
-        // only obeys. Record BEFORE moving, so a fault mid-turn still
-        // leaves an honest record of what was decided — but AFTER the
-        // verdict, so a byte the robot cannot execute never enters the
-        // record at all.
+        // The decision chain: the left-hand rule picks the move, the
+        // arrival verdict judges what to do with it, the path records
+        // it, the feedback hooks announce it — and only then does the
+        // robot act. Both logic halves are pure and host-tested; this
+        // loop only obeys. Record BEFORE moving, so a fault mid-turn
+        // still leaves an honest record of what was decided — but AFTER
+        // the verdict, so a byte the robot cannot execute never enters
+        // the record at all.
         move_t m = decide_left_hand(j);
         arrival_verdict_t v = explore_arrival_verdict(j, m);
-        if (v == ARRIVE_SUCCESS) {   // the goal patch — the run is won
+        if (v == ARRIVE_SUCCESS) {   // standing on the goal patch
             drive_stop();
             on_goal();
             return MODE_SOLVED;
@@ -335,9 +387,9 @@ static void path_to_string(const path_t *p, char out[PATH_MAX_MOVES + 1])
 
 // ----------------------------------------------------------------- SOLVED
 // The goal was found; path_raw holds the route with all its detours.
-// Day 20's seam, live: copy, simplify, and show BOTH strings — the crowd
-// should see "LLBLLBS" collapse into "LSR" on one screen. path_solved is
-// what REPLAY runs; path_raw is kept untouched as the honest record of
+// This mode copies it, simplifies the copy, and shows BOTH strings on one
+// screen, so the collapse ("LLBLLBS" into "LSR") is visible. path_solved
+// is what REPLAY runs; path_raw is kept untouched as the honest record of
 // what the explorer actually drove.
 static run_mode_t run_solved(void)
 {
@@ -365,6 +417,9 @@ static run_mode_t run_solved(void)
 }
 
 // ----------------------------------------------------------------- REPLAY
+// Drive path_solved to the goal against the lap clock. Needs a solved
+// path (EXPLORE must have reached the goal first) and a passing
+// preflight; returns the mode to enter next.
 static run_mode_t run_replay(void)
 {
     on_state_change(MODE_REPLAY);
@@ -386,21 +441,21 @@ static run_mode_t run_replay(void)
     telemetry_reset();
     telemetry_event(EV_RUN_START, MODE_REPLAY, SPEED_REPLAY);
 
-    // The Day-21 metric starts HERE — after the countdown, as the wheels
-    // are about to move, so showmanship never counts as driving time.
-    // The chain the scoreboard depends on: this lap_start → lap_stop on
-    // the goal arrival below (the ONLY route into MODE_DONE) → run_done
-    // reads last/best → the new-best melody. Break any link and DONE
-    // shows 0.00 s while the fanfare stays silent.
+    // The lap clock starts HERE — after the countdown, as the wheels are
+    // about to move, so the countdown never counts as driving time. The
+    // chain the lap display depends on: this lap_start → lap_stop on the
+    // goal arrival below (the ONLY route into MODE_DONE) → run_done reads
+    // last/best → the new-best melody. Break any link and DONE shows
+    // 0.00 s while the melody stays silent.
     lap_start();
 
-    // Day 20's seam, live: the same follow → creep → classify skeleton as
-    // run_explore, but the decision at each junction comes from
-    // replay_next(&path_solved, jct_idx) instead of the left-hand rule.
-    // Dispatch is on JUNCTION ARRIVALS, never on distance or time: tape
-    // stretches and wheels slip, but junction #4 is junction #4 forever.
+    // The same follow → creep → classify skeleton as run_explore, but the
+    // decision at each junction comes from replay_next(&path_solved,
+    // jct_idx) instead of the left-hand rule. Dispatch is on JUNCTION
+    // ARRIVALS, never on distance or time: tape stretches and wheels
+    // slip, but junction #4 is junction #4 forever.
     // The skeleton is duplicated from run_explore ON PURPOSE, not shared:
-    // Day 21's speed profile lives in THIS copy only — straights hot at
+    // the replay speed profile lives in THIS copy only — straights hot at
     // SPEED_REPLAY, then arrival_brake sheds the momentum before the
     // creep — and the explorer's copy must never feel any of it. The
     // profile itself is data in tuning.h (SPEED_REPLAY, SPEED_ARRIVAL,
@@ -415,12 +470,12 @@ static run_mode_t run_replay(void)
         if (st == DRIVE_TIMEOUT) { fault("lost: 10s no jct"); return MODE_DIAG; }
         if (st == DRIVE_LOST)    { fault("line LOST"); return MODE_DIAG; }
 
-        // Day 21's slowdown window, triggered by the ARRIVAL itself (the
+        // The slowdown window, triggered by the ARRIVAL itself (the
         // DRIVE_OK edge above) — never by guessed distance or elapsed
         // time. The motors are still running at base speed (drive.h's
         // contract): shed that momentum to SPEED_ARRIVAL now, BEFORE
         // creep_to_center takes the encoder baseline it measures CREEP_MM
-        // from. Physics and knobs: tuning.h, "Day 21: arrival window".
+        // from. Physics and knobs: tuning.h.
         st = arrival_brake(&before, SPEED_REPLAY);
         if (st == DRIVE_ABORT)   { return MODE_DIAG; }
 
@@ -434,17 +489,17 @@ static run_mode_t run_replay(void)
         // The plan for this arrival, and the verdict on it. The whole
         // decision table — path spent or not, what the classifier saw,
         // whether the byte is a move — lives in logic/maze_logic.c, with
-        // every cell pinned by host_tests; this loop's job is to obey it
-        // and put the right screen up.
+        // every cell pinned by the tests in tests/logic; this loop's job
+        // is to obey it and put the right screen up.
         move_t m = replay_next(&path_solved, jct_idx);
         arrival_verdict_t v = replay_arrival_verdict(j, m);
         if (v == ARRIVE_SUCCESS) {
-            // The clock stops on the arrival itself — before the fanfare
+            // The clock stops on the arrival itself — before the melody
             // and the screen, for the same reason it started after the
-            // countdown. lap_stop() latches last, best, and the was-best
+            // countdown. lap_stop() latches last, best and the was-best
             // verdict in one place; run_done() only ever READS them. A
-            // faulted run exits below WITHOUT stopping the clock: no
-            // finish, no time, nothing for the scoreboard to brag about.
+            // faulted run exits below WITHOUT stopping the clock, so it
+            // records no finish time at all.
             lap_stop();
             drive_stop();
             on_goal();
@@ -463,11 +518,10 @@ static run_mode_t run_replay(void)
 }
 
 // ------------------------------------------------------------------- DONE
-// The scoreboard — the read-only end of the lap chain (GO → lap_start,
-// goal → lap_stop, here → display). Every verdict below was latched by
-// lap_stop() at the goal; this screen reports, and the melody fires only
-// on a genuine new best. Day 21's speed work is about making this number
-// worth bragging about.
+// The read-only end of the lap chain (GO → lap_start, goal → lap_stop,
+// here → display). Every value below was latched by lap_stop() at the
+// goal; this screen only reports them, and the melody fires only on a
+// genuine new best.
 static run_mode_t run_done(void)
 {
     on_state_change(MODE_DONE);
@@ -485,15 +539,15 @@ static run_mode_t run_done(void)
 }
 
 // ------------------------------------------------------------------ SPARE
+// Unused slot in the menu: puts a screen up and returns. Kept so a new
+// mode can be added without touching the menu machinery.
 static run_mode_t run_spare(void)
 {
     on_state_change(MODE_SPARE);
     ui_clear();
     ui_text_big(0, 0, "SPARE");
-    ui_text(0, 3, "this mode is");
-    ui_text(0, 4, "yours. rename it,");
-    ui_text(0, 5, "make it do a");
-    ui_text(0, 6, "victory dance.");
+    ui_text(0, 3, "unused menu slot");
+    ui_text(0, 4, "for a new mode.");
     ui_flush_now();
     wait_for_button();
     return MODE_DIAG;
@@ -512,17 +566,17 @@ static void run_logdump(void)
     ui_text(0, 4, "USB terminal on?");
     ui_text(0, 5, "dumping...");
     ui_flush_now();
-    // Hand the dump its context (DS-a: telemetry observes, main.c is the
-    // one who knows the hardware). Battery is read NOW — resting, motors
-    // long stopped — so the loaded voltage during the run was lower
-    // still: a low number here is damning, not borderline. The cal
-    // window is read NOW too, and that is a real caveat: the ring is
-    // only cleared at a run start, so this is the window that scaled the
-    // rows ONLY if nothing recalibrated in between. Run CALIBRATE
-    // between the run and the dump and the header advertises the NEW
-    // window over rows the OLD one scaled. The arrays survive the walk
-    // to the laptop for the same reason the ring does — the no-power-off
-    // rule keeps the robot alive from run to dump.
+    // Hand the dump its context: telemetry.c only observes, and this file
+    // is the one that knows the hardware. Battery is read NOW — resting,
+    // motors long stopped — so the loaded voltage during the run was
+    // lower still: a low number here is damning, not borderline. The
+    // calibration window is read NOW too, and that is a real caveat: the
+    // ring is only cleared at a run start, so this is the window that
+    // scaled the rows ONLY if nothing recalibrated in between. Run
+    // CALIBRATE between the run and the dump and the header advertises
+    // the NEW window over rows the OLD one scaled. Both the ring and the
+    // window survive between a run and its dump only because the robot
+    // is never powered off in between.
     telemetry_set_dump_context(hw_battery_mv(),
                                hw_line_cal_min, hw_line_cal_max);
     telemetry_dump();
@@ -590,10 +644,10 @@ int main(void)
     telemetry_init();
     imu_ok = hw_imu_init();
 
-    // Boot splash: who am I, how's my blood sugar, is my inner ear OK.
+    // Boot splash: robot name, battery state, IMU presence.
     ui_clear();
     ui_text_big(0, 0, "%.16s", ROBOT_NAME);
-    ui_text(0, 2, "maze capstone");
+    ui_text(0, 2, "line maze solver");
     show_battery_line(4);
     ui_text(0, 5, "imu: %s", imu_ok ? "ok" : "MISSING");
     ui_text(0, 7, "hold C to begin");

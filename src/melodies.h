@@ -1,8 +1,12 @@
-// melodies.h — the robot's voice. Two melodies are given; the third one
-// is yours to compose (feedback.c plays whatever you point it at).
+// melodies.h — note tables for the buzzer.
 //
-// A melody is an array of {frequency_hz, duration_ms} notes, ended by
-// {0, 0}. A note with hz == 0 but ms > 0 is a rest.
+// A melody is an array of note_t entries, each a {frequency_hz,
+// duration_ms} pair, terminated by {0, 0}. A note with hz == 0 and
+// ms > 0 is a rest. feedback_play_melody() walks the table in order,
+// holding each note for its duration (blocking, one sleep_ms per note)
+// and leaving the buzzer silent at the end. Durations include no gap
+// between notes: repeat a pitch and it sounds as one long note unless a
+// short REST separates the two.
 #ifndef MELODIES_H
 #define MELODIES_H
 
@@ -51,8 +55,8 @@ static const note_t melody_new_best[] = {
     MELODY_END
 };
 
-// An open slot: compose your own — a fault dirge? a menu chirp? Wire it
-// up wherever you like via feedback_play_melody(). Day 5 was the rehearsal.
+// Further melodies go here and are played by passing them to
+// feedback_play_melody():
 // static const note_t melody_mine[] = { ... , MELODY_END };
 
 #endif // MELODIES_H

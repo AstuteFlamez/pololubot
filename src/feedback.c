@@ -1,5 +1,6 @@
-// feedback.c — buzzer (your Day 5 PWM), RGB LEDs (Pololu lib), and the
-// status/path drawing (via ui.c). All the robot's body language.
+// feedback.c — buzzer (PWM on the buzzer pin), RGB LEDs (vendor APA102
+// driver) and the status/path drawing that goes with them (via ui.c).
+// The contracts for everything here are in feedback.h.
 
 #include "feedback.h"
 #include "ui.h"
@@ -9,16 +10,16 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/pwm.h"
-#include "rgb_leds.h"        // Pololu lib (APA102 over spi0, shared w/ OLED)
+#include "rgb_leds.h"        // vendor lib (APA102 over spi0, shared w/ OLED)
 
-#define BUZZER_SLICE 3       // GP7 → slice 3, channel B (odd pin rule)
+// PWM slices are pin/2, and the odd pin in a pair is channel B.
+#define BUZZER_SLICE 3       // PIN_BUZZER = GP7 → slice 3, channel B
 #define RGB_BRIGHTNESS 3     // 0..31 — dim is plenty indoors
 
-// ======================================================================
-// The state color legend. One glance at the robot should tell you
-// what it THINKS it is doing — that's worth more than any printf when
-// it's twenty feet away in a maze. Repaint to taste.
-// ======================================================================
+// The state color legend: from twenty feet away in a maze the LEDs are
+// the only readout of what the firmware thinks it is doing, and nothing
+// can be printed from a running control loop. One entry per mode, indexed
+// by run_mode_t, so the table must grow with the enum.
 static const rgb_color state_color[MODE_COUNT] = {
     [MODE_DIAG]      = {  0,  0, 40 },   // blue    — "on the bench"
     [MODE_CALIBRATE] = { 40, 30,  0 },   // yellow  — "learning the floor"
@@ -26,7 +27,7 @@ static const rgb_color state_color[MODE_COUNT] = {
     [MODE_SOLVED]    = {  0, 40, 20 },   // teal    — "I know the way"
     [MODE_REPLAY]    = { 40,  0, 40 },   // magenta — "executing"
     [MODE_DONE]      = {  0, 40,  0 },   // green   — "victory lap"
-    [MODE_SPARE]     = { 40, 40, 40 },   // white   — yours
+    [MODE_SPARE]     = { 40, 40, 40 },   // white   — unused slot
     [MODE_LOGDUMP]   = { 10, 10, 10 },   // dim white — "talking to USB"
 };
 
@@ -47,7 +48,8 @@ static void buzzer_tone(uint16_t hz)
         pwm_set_chan_level(BUZZER_SLICE, PWM_CHAN_B, 0);
         return;
     }
-    // 1 MHz tick → wrap = period in µs. 50% duty = loudest square wave.
+    // The slice ticks at 1 MHz, so wrap is the period in µs and the
+    // frequency is 1e6/hz counts. 50% duty is the loudest square wave.
     uint16_t wrap = (uint16_t)(1000000u / hz - 1);
     pwm_set_wrap(BUZZER_SLICE, wrap);
     pwm_set_chan_level(BUZZER_SLICE, PWM_CHAN_B, (uint16_t)((wrap + 1) / 2));
@@ -62,6 +64,8 @@ void feedback_beep(uint16_t hz, uint16_t ms)
 
 void feedback_play_melody(const note_t *m)
 {
+    // {0, ms} is a rest and {0, 0} is the terminator, so both fields must
+    // be zero before the loop stops.
     for (; m->hz != 0 || m->ms != 0; m++) {
         buzzer_tone(m->hz);
         sleep_ms(m->ms);
@@ -84,7 +88,8 @@ void on_state_change(run_mode_t m)
     feedback_rgb_all(c.red, c.green, c.blue);
 }
 
-// Draw the path as big 8×16 text, two rows of 16 = last 32 moves visible.
+// Draw the path as 8x16 text: two rows of 16 characters, so the last 32
+// moves are visible. Older moves scroll off the front.
 static void draw_path(const path_t *p)
 {
     char row[17];
@@ -105,8 +110,8 @@ void on_junction(junction_t j, move_t decided, const path_t *path_so_far)
     ui_text(0, 1, "%-9s -> %c  ", junction_name(j),
             decided ? decided : '?');
     draw_path(path_so_far);
-    ui_flush_now();               // robot is stopped at the junction: legal
-    feedback_beep(NOTE_A5, 30);   // one tick per junction — count them by ear
+    ui_flush_now();               // stopped at the junction, so a push is legal
+    feedback_beep(NOTE_A5, 30);   // one tick per junction, countable by ear
 }
 
 void on_goal(void)
@@ -136,6 +141,7 @@ void on_countdown(int n)
     ui_clear();
     ui_text_big(7, 1, "%d", n);
     ui_flush_now();
-    // Rising pitch: ears learn "3-2-1-GO" faster than eyes read it.
+    // Pitch rises as n falls, so the countdown can be followed without
+    // watching the screen: 523 Hz, 623 Hz, 723 Hz.
     feedback_beep((uint16_t)(NOTE_C5 + (3 - n) * 100), 120);
 }
