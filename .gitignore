@@ -1,0 +1,23 @@
+build/
+*.o
+*.elf
+*.hex
+*.map
+*.lst
+*.dSYM/
+.DS_Store
+.vscode/
+__pycache__/
+/.venv/
+
+# Fetched by tools/setup.sh, never committed.
+third_party/pico-sdk
+third_party/arm-gnu-toolchain
+
+# Host test binaries.
+tests/logic/test_maze_logic
+tests/logic/sim_maze
+
+# Captured runs and the plots made from them.
+/logs/
+*.png
