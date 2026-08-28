@@ -1,28 +1,29 @@
-// maze_logic_ref.c — the reference junction classifier: the fallback lane.
+// maze_logic_ref.c — a second, deliberately simpler junction classifier, plus
+// junction_name().
 //
-// Why this exists: the project's first firmware was a "maze walker" that
-// bounced off dead ends on a crude reference classifier, written so the
-// plumbing could be exercised separately from the brain. No session ever
-// ran on it — the brain landed first (day19/README.md:42–46 tells the
-// same history) — so that scaffolding job lapsed unused. The classifier
-// stays compiled into the binary anyway, for two better reasons:
+// This is an intentionally crude implementation of the same job
+// classify_junction() does, kept in the build as a cross-check. It reads one
+// hard-coded threshold, has no tuning.h knobs, no stated GOAL-vs-CROSS margin
+// and no refusal band beyond a single case, which is the point: everything
+// the real classifier adds is visible as the diff between the two files.
 //
-//   * FALLBACK — comment out USE_MY_CLASSIFIER in tuning.h and explore
-//     runs on this classifier instead: same decision layer, same seams,
-//     only the evidence→symbol step swapped. If the real classifier
-//     ever misbehaves on the floor, one #define gives you a control
-//     group — and the simulator re-proves this lane on every
-//     `make -C host_tests`, so it can never quietly rot.
-//   * BASELINE — it is deliberately crude: one hard-coded threshold, no
-//     tuning.h knobs, no margin logic, no refusal gap beyond one case.
-//     Read it freely, side by side with classify_junction(): everything
-//     the real classifier adds (calibrated knobs, the stated
-//     GOAL-vs-CROSS margin, honest JCT_NONE refusals) is visible as the
-//     diff between these two files.
+// It also serves as a fallback lane. Comment out USE_MY_CLASSIFIER in
+// include/tuning.h and explore runs on this classifier instead — same
+// decision layer, same interfaces, only the evidence-to-symbol step swapped —
+// so a classifier misbehaving on the floor can be checked against a control
+// group with one #define. The simulator re-proves this lane on every
+// `make -C tests/logic`, so it cannot quietly rot.
 
 #include "maze_logic.h"
 
-#define REF_DARK 600  // fixed on purpose — crude is this file's job (above)
+// Fixed on purpose — crude is this file's job. The threshold is file-local
+// (no header, no knob), and tests/logic/sim_maze.c mirrors it as
+// SIM_REF_DARK: the Makefile extracts the number straight out of this line
+// and passes it in, and the simulator refuses to compile if the two disagree.
+// Changing this value therefore breaks the build rather than silently moving
+// the fallback lane out of the band the simulator's marginal-tape palette
+// straddles.
+#define REF_DARK 600
 
 static bool dark(uint16_t v) { return v >= REF_DARK; }
 
@@ -34,7 +35,7 @@ junction_t classify_junction_ref(const sensor_snapshot_t *before,
     bool straight = dark(at_center->s[1]) || dark(at_center->s[2]) ||
                     dark(at_center->s[3]);
 
-    // Goal patch: after creeping forward we are STILL on solid black.
+    // Goal patch: after creeping forward the bar is STILL on solid black.
     int center_dark = 0;
     for (int i = 0; i < 5; i++) {
         if (dark(at_center->s[i])) { center_dark++; }
