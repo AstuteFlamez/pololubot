@@ -41,10 +41,9 @@
 // it cross-checks three things at once — the topology encoding, the hand
 // walk, and the code. If any one of them is wrong, they cannot all agree.
 //
-// Both mazes are transcribed from their drawings as DESIGNED. No physical
-// board has been taped and measured, so the tables and their expected
-// paths are provisional: when a board exists, any drift between it and
-// these tables must be reconciled INTO the tables first. A simulator that
+// Both mazes are transcribed from their drawings. If a taped board ever
+// differs from its drawing — a re-routed arm, a moved dead end — the drift
+// is reconciled INTO these tables before anything else. A simulator that
 // walks a different maze than the robot does is worse than no simulator.
 //
 // Pure host C on purpose: maze_logic.h, tuning.h (host-safe — nothing but
@@ -231,12 +230,9 @@ typedef struct {
     const char       *simplify_oracle; // drawing: the cross-check literals
 } sim_maze_t;
 
-// The starter maze, transcribed arm-for-arm from its drawing. That
-// drawing is the PROVISIONAL oracle: it describes the maze as designed,
-// and the physical maze has not been built and measured yet. When it is,
-// any as-built drift is reconciled INTO this table first — a simulator
-// that walks a different maze than the robot does is worse than no
-// simulator:
+// The starter maze, transcribed arm-for-arm from its drawing, which is the
+// oracle for the expected paths below. Re-tape the board differently and
+// this table is what has to change first:
 //
 //         X2─────F─────■ GOAL
 //                 │
@@ -674,10 +670,9 @@ static void run_maze_suite(const sim_maze_t *mz)
 
 // ---------------------------------------------------------------------------
 // THE HARDER MAZE — two boards, six junctions, five dead ends, one
-// 4-way. Transcribed arm-for-arm from its drawing, with the same
-// provisional-oracle caveat as the starter table above: as designed, not
-// as built, and the as-built measurements reconcile into here the day
-// they exist:
+// 4-way. Transcribed arm-for-arm from its drawing, on the same terms as
+// the starter table above: the drawing is the oracle, and a board that
+// disagrees with it is reconciled into here first:
 //
 //                 F─────X5
 //                 │

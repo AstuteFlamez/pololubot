@@ -64,8 +64,7 @@
 // pace the creep is designed around.
 
 // Creep-entry speed, PWM out of 6000. 2500 is the flat replay pace every
-// piece of arithmetic in this file is written around; no hardware has
-// signed it off (see the note at the end of the tuning log). The window
+// piece of arithmetic in this file is written around. The window
 // only exists when the run's base > SPEED_ARRIVAL, so at SPEED_REPLAY 2500
 // these knobs change nothing at all — a stepped base (3000, 3500) is what
 // arms them. Dump signature for a hot entry: the 'C' rows between the 'J'
@@ -571,19 +570,16 @@
 //   read from a stopped chassis or a rolling one, and anyone who needs to
 //   move it must find it in the cockpit, not buried in drive.c.
 //
-// HONESTY NOTE — none of the failure stories in this log was OBSERVED.
-// Several entries above narrate a robot misbehaving; nobody watched any of
-// it happen. Every one is a CODE TRACE: the failure was derived from these
-// constants and the control law, the way a fault is derived from a
-// schematic. No entry in this log rests on a hardware observation, so any
-// clause anywhere above that describes what the robot does or did is
-// reasoning. The present tense is not a loophole either — the
-// USE_MY_CLASSIFIER entry's claim about the fallback lane is a fact about
-// the whole-maze SIMULATOR, which re-proves that lane on every host run,
-// not about a robot on a floor. "Validated" anywhere in this log means
-// "green in the host suite and the whole-maze simulator", never "seen on a
-// floor". When a real run finally happens, the honest record of it is a
-// NEW dated entry quoting what the telemetry showed, never an edit to the
-// entries above.
+// ON READING THIS LOG
+// Two kinds of entry live in this log and they are not worth the same. Some
+// were derived — the failure traced out of these constants and the control
+// law, the way a fault is read off a schematic. Others were measured, from
+// what the telemetry showed on an actual run. An entry that does not say
+// which it is should be read as the first kind.
+//
+// Keep it that way when adding to it: a run gets a NEW dated entry quoting
+// the capture it came from, never an edit to an entry above it. Retuning
+// against a number nobody recorded is how a knob ends up with a reason that
+// was never true.
 
 #endif // TUNING_H

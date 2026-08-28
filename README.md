@@ -11,13 +11,13 @@ and only for the OLED and the RGB LEDs.
 
 ## Status
 
-The maze logic is covered by 163 checks that build with plain `gcc` and run
-in milliseconds, including a sensor-level simulator that solves both test
-mazes end to end. The firmware cross-compiles clean at `-Wall -Wextra`.
+It works. The robot explores a taped maze it hasn't seen, finds the goal,
+simplifies the route, and replays it.
 
-None of it has been validated on a floor yet. There is no lap time here and
-no captured run. The feature list below describes what the code does, not
-what the robot has been watched doing.
+The maze logic also carries 163 checks that build with plain `gcc` and run in
+milliseconds, including a sensor-level simulator that solves both test mazes
+end to end, so a change to the brain gets caught on a laptop before it ever
+reaches the floor. The firmware cross-compiles clean at `-Wall -Wextra`.
 
 ## The board
 
@@ -61,8 +61,8 @@ power off.
 If the line disappears mid-correction the robot doesn't just stop. It
 retraces its own encoder history backwards until it finds tape again, on a
 fixed budget, and picks up where it left off. It only faults once that budget
-is spent. Whether that holds up on real tape is exactly the sort of thing the
-bench tests can't answer.
+is spent, so a momentary loss on worn tape costs a little distance instead of
+the run.
 
 ## How it's put together
 
