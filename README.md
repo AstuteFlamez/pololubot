@@ -9,6 +9,9 @@ microsecond timer, PWM, the encoder interrupts, the ADC, and the I2C traffic
 to the IMU are all local code. The only vendor library linked in is Pololu's,
 and only for the OLED and the RGB LEDs.
 
+Developed July–August 2026 in a private repo (314 commits); this is a
+cleaned-up standalone re-import, so history here starts at the import.
+
 This README is the tour. [`docs/`](docs/) is the detail: one document per
 sensor, plus one each for the motion layer, the maze search and the shortest
 path — the mechanism, where every constant came from, and the telemetry
