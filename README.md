@@ -174,6 +174,7 @@ to read is gone the moment you start the replay after it.
 src/              drivers and motion, robot-only
 logic/            the maze brain, builds on host and robot both
 include/          pins.h (with the shared-pin traps annotated), tuning.h
+docs/             layer notes: one per sensor, plus motion, search, path
 tests/logic/      host tests and the maze simulator
 tests/telemetry/  CSV decode contract and its fixture
 tools/            setup, flash, capture, plot
