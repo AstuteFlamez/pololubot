@@ -9,6 +9,11 @@ microsecond timer, PWM, the encoder interrupts, the ADC, and the I2C traffic
 to the IMU are all local code. The only vendor library linked in is Pololu's,
 and only for the OLED and the RGB LEDs.
 
+This README is the tour. [`docs/`](docs/) is the detail: one document per
+sensor, plus one each for the motion layer, the maze search and the shortest
+path — the mechanism, where every constant came from, and the telemetry
+signature of each way it fails.
+
 ## Status
 
 It works. The robot explores a taped maze it hasn't seen, finds the goal,
