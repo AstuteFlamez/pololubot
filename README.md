@@ -187,6 +187,16 @@ cmake/            toolchain and SDK wiring
 third_party/      Pololu's display and LED library
 ```
 
+## AI assistance
+
+This project was built with help from [Claude](https://claude.ai), used
+through Claude Code.
+
+Everything under `docs/` was written by Claude, from a read of the firmware
+it describes. Claude also worked on the source comments and on review passes
+over the code. The robot, the maze, the tuning and every run on the floor
+are mine.
+
 ## References
 
 - [3pi+ 2040 User's Guide](https://www.pololu.com/docs/0J86) — pinout and schematics
