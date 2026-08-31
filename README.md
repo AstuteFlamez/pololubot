@@ -4,6 +4,8 @@ Firmware for a Pololu 3pi+ 2040 that solves a taped line maze. It explores
 until it finds the goal, works out the shortest route from what it recorded,
 and then runs that route back at speed.
 
+![The robot exploring a taped maze, finding the goal, and replaying the shortest route](docs/demo.gif)
+
 Almost everything is written against the RP2040 directly. GPIO, the
 microsecond timer, PWM, the encoder interrupts, the ADC, and the I2C traffic
 to the IMU are all local code. The only vendor library linked in is Pololu's,
